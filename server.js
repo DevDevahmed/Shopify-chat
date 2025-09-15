@@ -214,6 +214,48 @@ app.get('/api/vendor/uid/:email', async (req, res) => {
   res.json({ uid: vendor.uid });
 });
 
+// CometChat Message Webhook - Triggered when customer sends a message
+app.post('/api/cometchat-webhook', async (req, res) => {
+  try {
+    const { data } = req.body;
+    
+    // Check if this is a message event from a customer
+    if (data && data.message && data.message.sender) {
+      const senderId = data.message.sender.uid;
+      const receiverId = data.message.receiver?.uid;
+      
+      console.log(`💬 Message webhook: ${senderId} → ${receiverId}`);
+      
+      // Check if sender is a customer (not a vendor)
+      try {
+        const senderData = await cometChatAPI(`/users/${senderId}`);
+        const isCustomer = senderData.data?.metadata?.role === 'customer';
+        
+        if (isCustomer) {
+          // Get customer-vendor mapping to find assigned vendor
+          const mapping = await getCustomerVendorMapping();
+          const assignedVendor = mapping[senderId];
+          
+          if (assignedVendor) {
+            // Mark customer as active (has sent a message)
+            await markCustomerAsActive(senderId, assignedVendor);
+            console.log(`✅ Customer ${senderId} marked as active for vendor ${assignedVendor}`);
+          } else {
+            console.warn(`⚠️ Customer ${senderId} sent message but no vendor assigned`);
+          }
+        }
+      } catch (error) {
+        console.error('Error processing message webhook:', error.message);
+      }
+    }
+    
+    res.json({ success: true, message: 'Webhook processed' });
+  } catch (error) {
+    console.error('CometChat webhook error:', error);
+    res.status(500).json({ error: 'Webhook processing failed' });
+  }
+});
+
 app.post('/api/sync-customer', async (req, res) => {
   const { id, email, first_name } = req.body;
   if (!id) return res.status(400).json({ error: "Customer ID required" });
@@ -274,6 +316,7 @@ app.post('/api/sync-customer', async (req, res) => {
 
 // File paths for data storage
 const CUSTOMER_VENDOR_MAPPING_FILE = path.join(__dirname, 'data', 'customer-vendor-mapping.json');
+const ACTIVE_CUSTOMERS_FILE = path.join(__dirname, 'data', 'active-customers.json');
 
 // Helper functions for customer-vendor mapping
 async function getCustomerVendorMapping() {
@@ -290,27 +333,74 @@ async function saveCustomerVendorMapping(mapping) {
   await fs.writeFile(CUSTOMER_VENDOR_MAPPING_FILE, JSON.stringify(mapping, null, 2));
 }
 
-// Get customers assigned to a specific vendor
+// Helper functions for active customers (who have sent messages)
+async function getActiveCustomers() {
+  try {
+    const data = await fs.readFile(ACTIVE_CUSTOMERS_FILE, 'utf8');
+    return JSON.parse(data);
+  } catch {
+    return {}; // customerId -> { vendorId, firstMessageAt, lastMessageAt }
+  }
+}
+
+async function saveActiveCustomers(activeCustomers) {
+  await fs.mkdir(path.dirname(ACTIVE_CUSTOMERS_FILE), { recursive: true });
+  await fs.writeFile(ACTIVE_CUSTOMERS_FILE, JSON.stringify(activeCustomers, null, 2));
+}
+
+// Mark customer as active (has sent a message)
+async function markCustomerAsActive(customerId, vendorId) {
+  const activeCustomers = await getActiveCustomers();
+  const now = new Date().toISOString();
+  
+  if (!activeCustomers[customerId]) {
+    activeCustomers[customerId] = {
+      vendorId,
+      firstMessageAt: now,
+      lastMessageAt: now
+    };
+    console.log(`🟢 Customer ${customerId} is now active (first message sent)`);
+  } else {
+    activeCustomers[customerId].lastMessageAt = now;
+  }
+  
+  await saveActiveCustomers(activeCustomers);
+  return activeCustomers[customerId];
+}
+
+// Get customers assigned to a specific vendor (ONLY ACTIVE CUSTOMERS WHO SENT MESSAGES)
 app.get('/api/vendor/:vendorUid/customers', async (req, res) => {
   try {
     const { vendorUid } = req.params;
-    const mapping = await getCustomerVendorMapping();
+    const activeCustomers = await getActiveCustomers();
     
-    // Find all customers assigned to this vendor
-    const assignedCustomerIds = Object.keys(mapping).filter(customerId => mapping[customerId] === vendorUid);
+    // Find only ACTIVE customers assigned to this vendor (who have sent messages)
+    const activeCustomerIds = Object.keys(activeCustomers).filter(customerId => 
+      activeCustomers[customerId].vendorId === vendorUid
+    );
+    
+    console.log(`Vendor ${vendorUid} has ${activeCustomerIds.length} active customers (who sent messages)`);
     
     // Fetch customer details from CometChat
     const customers = [];
-    for (const customerId of assignedCustomerIds) {
+    for (const customerId of activeCustomerIds) {
       try {
         const customer = await cometChatAPI(`/users/${customerId}`);
-        customers.push(customer.data);
+        const customerData = customer.data;
+        
+        // Add activity info
+        customerData.activityInfo = activeCustomers[customerId];
+        customers.push(customerData);
       } catch (error) {
-        console.warn(`Customer ${customerId} not found in CometChat:`, error.message);
+        console.warn(`Active customer ${customerId} not found in CometChat:`, error.message);
       }
     }
     
-    res.json({ customers });
+    res.json({ 
+      customers,
+      totalActive: customers.length,
+      message: customers.length === 0 ? 'No customers have sent messages yet' : `${customers.length} active customers`
+    });
   } catch (error) {
     console.error('Error fetching vendor customers:', error);
     res.status(500).json({ error: 'Failed to fetch customers' });
@@ -391,6 +481,39 @@ app.get('/api/customer-vendor-assignments', async (req, res) => {
   } catch (error) {
     console.error('Error fetching assignments:', error);
     res.status(500).json({ error: 'Failed to fetch assignments' });
+  }
+});
+
+// Manual endpoint to activate customer (for testing - simulates customer sending first message)
+app.post('/api/activate-customer', async (req, res) => {
+  try {
+    const { customerId } = req.body;
+    
+    if (!customerId) {
+      return res.status(400).json({ error: 'Customer ID is required' });
+    }
+    
+    // Get customer-vendor mapping
+    const mapping = await getCustomerVendorMapping();
+    const assignedVendor = mapping[customerId];
+    
+    if (!assignedVendor) {
+      return res.status(404).json({ error: 'Customer not found or not assigned to any vendor' });
+    }
+    
+    // Mark customer as active
+    const activityInfo = await markCustomerAsActive(customerId, assignedVendor);
+    
+    res.json({
+      success: true,
+      message: `Customer ${customerId} activated for vendor ${assignedVendor}`,
+      customerId,
+      vendorId: assignedVendor,
+      activityInfo
+    });
+  } catch (error) {
+    console.error('Error activating customer:', error);
+    res.status(500).json({ error: 'Failed to activate customer' });
   }
 });
 
