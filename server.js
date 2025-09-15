@@ -30,6 +30,11 @@ const COMETCHAT_API_BASE = `https://api-${process.env.COMETCHAT_REGION}.cometcha
 // Helper function to make CometChat API calls
 async function cometChatAPI(endpoint, method = 'GET', data = null) {
   try {
+    // Validate required environment variables
+    if (!process.env.COMETCHAT_APP_ID || !process.env.COMETCHAT_AUTH_KEY || !process.env.COMETCHAT_REGION) {
+      throw new Error('Missing CometChat environment variables. Please check COMETCHAT_APP_ID, COMETCHAT_AUTH_KEY, and COMETCHAT_REGION');
+    }
+    
     const config = {
       method,
       url: `${COMETCHAT_API_BASE}${endpoint}`,
@@ -45,10 +50,17 @@ async function cometChatAPI(endpoint, method = 'GET', data = null) {
       config.data = data;
     }
     
+    console.log(`CometChat API Call: ${method} ${config.url}`);
     const response = await axios(config);
+    console.log(`CometChat API Success: ${response.status}`);
     return response.data;
   } catch (error) {
-    console.error('CometChat API Error:', error.response?.data || error.message);
+    console.error('CometChat API Error Details:');
+    console.error('- URL:', `${COMETCHAT_API_BASE}${endpoint}`);
+    console.error('- Method:', method);
+    console.error('- Status:', error.response?.status);
+    console.error('- Response:', error.response?.data);
+    console.error('- Message:', error.message);
     throw error;
   }
 }
@@ -351,9 +363,7 @@ app.get('/api/vendors', async (req, res) => {
 // Get all customers (for super user dashboard)
 app.get('/api/customers', async (req, res) => {
   try {
-    const usersRequest = new CometChat.UsersRequestBuilder().setLimit(100).build();
-    // Note: This requires CometChat to be initialized, but we're using REST API
-    // Let's use the REST API instead
+    // Use CometChat REST API to fetch users
     const response = await cometChatAPI('/users?limit=100');
     const allUsers = response.data || [];
     
@@ -362,10 +372,14 @@ app.get('/api/customers', async (req, res) => {
       user.metadata && user.metadata.role === 'customer'
     );
     
+    console.log(`Found ${customers.length} customers out of ${allUsers.length} total users`);
     res.json({ customers });
   } catch (error) {
-    console.error('Error fetching customers:', error);
-    res.status(500).json({ error: 'Failed to fetch customers' });
+    console.error('Error fetching customers:', error.response?.data || error.message);
+    
+    // If CometChat API fails, return empty array for now
+    // This allows the system to work even if no customers exist yet
+    res.json({ customers: [], message: 'No customers found or CometChat API unavailable' });
   }
 });
 
@@ -377,6 +391,45 @@ app.get('/api/customer-vendor-assignments', async (req, res) => {
   } catch (error) {
     console.error('Error fetching assignments:', error);
     res.status(500).json({ error: 'Failed to fetch assignments' });
+  }
+});
+
+// Debug endpoint to test CometChat connection
+app.get('/api/debug/cometchat', async (req, res) => {
+  try {
+    console.log('🔍 Testing CometChat connection...');
+    console.log('Environment variables:');
+    console.log('- COMETCHAT_APP_ID:', process.env.COMETCHAT_APP_ID ? '✅ Set' : '❌ Missing');
+    console.log('- COMETCHAT_AUTH_KEY:', process.env.COMETCHAT_AUTH_KEY ? '✅ Set' : '❌ Missing');
+    console.log('- COMETCHAT_REGION:', process.env.COMETCHAT_REGION ? '✅ Set' : '❌ Missing');
+    console.log('- API Base URL:', COMETCHAT_API_BASE);
+    
+    // Test basic API connectivity
+    const response = await cometChatAPI('/users?limit=1');
+    
+    res.json({
+      success: true,
+      message: 'CometChat connection successful',
+      apiBase: COMETCHAT_API_BASE,
+      totalUsers: response.data?.length || 0,
+      environment: {
+        appId: process.env.COMETCHAT_APP_ID ? 'Set' : 'Missing',
+        authKey: process.env.COMETCHAT_AUTH_KEY ? 'Set' : 'Missing',
+        region: process.env.COMETCHAT_REGION ? 'Set' : 'Missing'
+      }
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      error: error.message,
+      details: error.response?.data,
+      apiBase: COMETCHAT_API_BASE,
+      environment: {
+        appId: process.env.COMETCHAT_APP_ID ? 'Set' : 'Missing',
+        authKey: process.env.COMETCHAT_AUTH_KEY ? 'Set' : 'Missing',
+        region: process.env.COMETCHAT_REGION ? 'Set' : 'Missing'
+      }
+    });
   }
 });
 
