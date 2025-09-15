@@ -1,0 +1,16 @@
+{
+  "name": "shopify-vendor-chat-backend",
+  "version": "1.0.0",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "express": "^4.18.2",
+    "cors": "^2.8.5",
+    "dotenv": "^16.3.1",
+    "@cometchat/chat-sdk-javascript": "^4.0.11",
+    "bcryptjs": "^2.4.3",
+    "csv-parser": "^3.0.0"
+  }
+}

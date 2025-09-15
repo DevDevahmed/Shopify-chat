@@ -1,0 +1,20 @@
+[
+  {
+    "uid": "sh_vendor_001",
+    "email": "vendor1@example.com",
+    "name": "Ahmed Electronics",
+    "password": "$2a$10$aPR9jtyNPNrm.d7wSvnlN.urNFvqETdXQqxkzUJ/wdokv71E2eqB."
+  },
+  {
+    "uid": "sh_vendor_002", 
+    "email": "vendor2@example.com",
+    "name": "Sarah Fashion Store",
+    "password": "$2a$10$aPR9jtyNPNrm.d7wSvnlN.urNFvqETdXQqxkzUJ/wdokv71E2eqB."
+  },
+  {
+    "uid": "sh_vendor_003",
+    "email": "vendor3@example.com", 
+    "name": "Mike Sports Shop",
+    "password": "$2a$10$aPR9jtyNPNrm.d7wSvnlN.urNFvqETdXQqxkzUJ/wdokv71E2eqB."
+  }
+]
