@@ -466,7 +466,7 @@ app.get('/api/vendors/available', async (req, res) => {
       name: vendor.name,
       email: vendor.email,
       status: 'online', // TODO: Implement real status checking
-      department: vendor.name // Using name as department for now
+      department: vendor.vendorName // Use vendorName as the department
     }));
     
     res.json({ 
@@ -515,6 +515,29 @@ app.post('/api/customer/select-vendor', async (req, res) => {
   } catch (error) {
     console.error('Error selecting vendor:', error);
     res.status(500).json({ error: 'Failed to select vendor' });
+  }
+});
+
+// Customer sends a message to a vendor
+app.post('/api/send-message', async (req, res) => {
+  try {
+    const { customerId, vendorId, message, timestamp } = req.body;
+
+    if (!customerId || !vendorId || !message || !timestamp) {
+      return res.status(400).json({ error: 'Missing required fields for sending a message' });
+    }
+
+    // Log the message on the server
+    console.log(`[${timestamp}] Message from ${customerId} to ${vendorId}: ${message}`);
+
+    // Here you would typically save the message to a database
+    // For now, we'll just acknowledge receipt
+
+    res.json({ success: true, message: 'Message received' });
+
+  } catch (error) {
+    console.error('Error sending message:', error);
+    res.status(500).json({ error: 'Failed to send message' });
   }
 });
 

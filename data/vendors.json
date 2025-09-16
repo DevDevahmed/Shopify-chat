@@ -2,19 +2,25 @@
   {
     "uid": "vendor_001",
     "email": "vendor1@yourstore.com",
-    "name": "Electronics Department",
+    "name": "Ahmed - Electronics Expert",
+    "role": "vendor",
+    "vendorName": "Electronics Department",
     "password": "$2a$10$aPR9jtyNPNrm.d7wSvnlN.urNFvqETdXQqxkzUJ/wdokv71E2eqB."
   },
   {
     "uid": "vendor_002",
     "email": "vendor2@yourstore.com",
-    "name": "Fashion Department",
+    "name": "Sarah - Fashion Specialist",
+    "role": "vendor",
+    "vendorName": "Fashion Department",
     "password": "$2a$10$aPR9jtyNPNrm.d7wSvnlN.urNFvqETdXQqxkzUJ/wdokv71E2eqB."
   },
   {
     "uid": "vendor_003",
     "email": "vendor3@yourstore.com",
-    "name": "Sports Department",
+    "name": "Mike - Sports Gear Pro",
+    "role": "vendor",
+    "vendorName": "Sports Department",
     "password": "$2a$10$aPR9jtyNPNrm.d7wSvnlN.urNFvqETdXQqxkzUJ/wdokv71E2eqB."
   }
 ]
