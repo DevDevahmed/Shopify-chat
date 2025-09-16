@@ -100,6 +100,24 @@ async function ensureVendorExists(vendor) {
   }
 }
 
+async function ensureCustomerExists(customerId) {
+  try {
+    await cometChatAPI(`/users/${customerId}`);
+  } catch (e) {
+    try {
+      const userData = {
+        uid: customerId,
+        name: `Customer ${customerId}`,
+        metadata: { role: "customer" }
+      };
+      await cometChatAPI('/users', 'POST', userData);
+      console.log(`✅ Created customer in CometChat: ${customerId}`);
+    } catch (createError) {
+      console.error(`❌ Failed to create customer ${customerId}:`, createError.response?.data || createError.message);
+    }
+  }
+}
+
 app.post('/api/sync-vendors', async (req, res) => {
   try {
     const vendors = [];
@@ -557,6 +575,17 @@ app.post('/api/send-message', async (req, res) => {
     const messages = await getMessages();
     messages.push({ customerId, vendorId, message, timestamp });
     await saveMessages(messages);
+
+    // Mark customer as active so they appear in vendor dashboard
+    await markCustomerAsActive(customerId, vendorId);
+    console.log(`✅ Customer ${customerId} marked as active for vendor ${vendorId}`);
+
+    // Create customer in CometChat if they don't exist (for vendor dashboard messaging)
+    try {
+      await ensureCustomerExists(customerId);
+    } catch (error) {
+      console.error('Failed to create customer in CometChat:', error);
+    }
 
     res.json({ success: true, message: 'Message received' });
 
