@@ -403,34 +403,69 @@ async function markCustomerAsActive(customerId, vendorId) {
   return activeCustomers[customerId];
 }
 
-// Get customers assigned to a specific vendor (ONLY ACTIVE CUSTOMERS WHO SENT MESSAGES)
-app.get('/api/vendor/:vendorUid/customers', async (req, res) => {
+// Get customers assigned to a specific vendor - fetch directly from CometChat conversations
+app.get('/api/vendors/:vendorUid/customers', async (req, res) => {
   try {
     const { vendorUid } = req.params;
+    console.log(`🔍 Fetching customers for vendor: ${vendorUid}`);
+    
+    // Method 1: Get conversations for this vendor from CometChat
+    try {
+      const conversationsResponse = await cometChatAPI(`/users/${vendorUid}/conversations?conversationType=user&limit=100`);
+      
+      if (conversationsResponse.data && conversationsResponse.data.length > 0) {
+        const customers = conversationsResponse.data
+          .filter(conversation => {
+            // Filter out conversations where the vendor is talking to themselves
+            return conversation.conversationWith && conversation.conversationWith.uid !== vendorUid;
+          })
+          .map(conversation => {
+            const customer = conversation.conversationWith;
+            // Add conversation metadata
+            customer.lastActive = conversation.updatedAt;
+            customer.lastMessage = conversation.lastMessage;
+            customer.conversationId = conversation.conversationId;
+            return customer;
+          });
+        
+        console.log(`📋 Found ${customers.length} customers with conversations for vendor ${vendorUid}`);
+        return res.json({ 
+          customers,
+          total: customers.length,
+          source: 'cometchat_conversations'
+        });
+      }
+    } catch (conversationError) {
+      console.warn('Failed to fetch conversations from CometChat, trying fallback method:', conversationError.message);
+    }
+    
+    // Method 2: Fallback - get from local active customers (legacy method)
     const activeCustomers = await getActiveCustomers();
-    // Find only ACTIVE customers assigned to this vendor (who have sent messages)
     const activeCustomerIds = Object.keys(activeCustomers).filter(customerId => 
       activeCustomers[customerId].vendorId === vendorUid
     );
-    console.log(`Vendor ${vendorUid} has ${activeCustomerIds.length} active customers (who sent messages)`);
-    // Fetch customer details from CometChat
+    
+    console.log(`📋 Fallback: Vendor ${vendorUid} has ${activeCustomerIds.length} active customers from local storage`);
+    
     const customers = [];
     for (const customerId of activeCustomerIds) {
       try {
         const customer = await cometChatAPI(`/users/${customerId}`);
         const customerData = customer.data;
-        // Add activity info
         customerData.activityInfo = activeCustomers[customerId];
         customers.push(customerData);
       } catch (error) {
-        console.warn(`Active customer ${customerId} not found in CometChat:`, error.message);
+        console.warn(`Customer ${customerId} not found in CometChat:`, error.message);
       }
     }
+    
     res.json({ 
       customers,
-      totalActive: customers.length,
+      total: customers.length,
+      source: 'local_storage_fallback',
       message: customers.length === 0 ? 'No customers have sent messages yet' : `${customers.length} active customers`
     });
+    
   } catch (error) {
     console.error('Error fetching vendor customers:', error);
     res.status(500).json({ error: 'Failed to fetch customers' });
@@ -470,14 +505,18 @@ app.get('/api/vendor/active', async (req, res) => {
 app.get('/api/vendors/available', async (req, res) => {
   try {
     const vendors = await getVendors();
+    
     // Format vendors for customer selection UI
     const availableVendors = vendors.map(vendor => ({
       uid: vendor.uid,
       name: vendor.name,
       email: vendor.email,
       status: 'online', // TODO: Implement real status checking
-      department: vendor.vendorName // Use vendorName as the department
+      department: vendor.name || vendor.vendorName || vendor.uid // Use name as department, fallback to vendorName or uid
     }));
+    
+    console.log(`📋 Available vendors for customer selection:`, availableVendors.map(v => ({ uid: v.uid, name: v.name, department: v.department })));
+    
     res.json({ 
       vendors: availableVendors,
       total: availableVendors.length 
@@ -697,6 +736,88 @@ app.post('/api/sync-all-vendors', async (req, res) => {
   } catch (error) {
     console.error('Error syncing vendors:', error);
     res.status(500).json({ error: 'Failed to sync vendors' });
+  }
+});
+
+// Test endpoint to create a test customer and send a message to vendor_001
+app.post('/api/test/create-customer-conversation', async (req, res) => {
+  try {
+    const testCustomerId = 'test_customer_' + Date.now();
+    const vendorId = 'vendor_001';
+    
+    console.log(`🧪 Creating test customer ${testCustomerId} and conversation with ${vendorId}`);
+    
+    // 1. Create test customer in CometChat
+    const customerData = {
+      uid: testCustomerId,
+      name: `Test Customer ${testCustomerId.slice(-4)}`,
+      metadata: { role: 'customer', email: 'test@example.com' }
+    };
+    
+    try {
+      await cometChatAPI('/users', 'POST', customerData);
+      console.log(`✅ Created test customer: ${testCustomerId}`);
+    } catch (createError) {
+      if (createError.response?.data?.error?.code !== 'ERR_UID_ALREADY_EXISTS') {
+        throw createError;
+      }
+      console.log(`👤 Test customer already exists: ${testCustomerId}`);
+    }
+    
+    // 2. Ensure vendor exists
+    try {
+      await cometChatAPI(`/users/${vendorId}`);
+      console.log(`✅ Vendor ${vendorId} exists`);
+    } catch (vendorError) {
+      console.log(`❌ Vendor ${vendorId} not found:`, vendorError.response?.data);
+      return res.status(404).json({ error: `Vendor ${vendorId} not found in CometChat` });
+    }
+    
+    // 3. Send a test message from customer to vendor using CometChat REST API
+    const messageData = {
+      category: 'message',
+      type: 'text',
+      data: {
+        text: `Hello! This is a test message from ${customerData.name}. Can you help me?`
+      }
+    };
+    
+    try {
+      const messageResponse = await cometChatAPI(`/users/${testCustomerId}/messages`, 'POST', {
+        ...messageData,
+        receiver: vendorId,
+        receiverType: 'user'
+      });
+      console.log(`✅ Test message sent from ${testCustomerId} to ${vendorId}`);
+      
+      // 4. Mark customer as active in our local storage
+      await markCustomerAsActive(testCustomerId, vendorId);
+      
+      res.json({
+        success: true,
+        message: 'Test customer and conversation created successfully',
+        testCustomer: {
+          uid: testCustomerId,
+          name: customerData.name,
+          vendorId: vendorId
+        },
+        sentMessage: messageResponse.data
+      });
+      
+    } catch (messageError) {
+      console.error('❌ Failed to send test message:', messageError.response?.data);
+      res.status(500).json({ 
+        error: 'Failed to send test message',
+        details: messageError.response?.data 
+      });
+    }
+    
+  } catch (error) {
+    console.error('❌ Test customer creation failed:', error.response?.data || error.message);
+    res.status(500).json({ 
+      error: 'Failed to create test customer',
+      details: error.response?.data || error.message 
+    });
   }
 });
 
