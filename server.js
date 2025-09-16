@@ -640,6 +640,36 @@ app.get('/api/customer-vendor-assignments', async (req, res) => {
   }
 });
 
+// Get active customers for a vendor (customers who have sent messages) - fetch from CometChat
+app.get('/api/vendors/:vendorId/customers', async (req, res) => {
+  try {
+    const { vendorId } = req.params;
+    
+    // Get conversations for this vendor from CometChat
+    const conversationsResponse = await cometChatAPI(`/users/${vendorId}/conversations?conversationType=user&limit=100`);
+    
+    if (conversationsResponse.data && conversationsResponse.data.data) {
+      const customers = conversationsResponse.data.data
+        .filter(conversation => conversation.conversationWith && conversation.conversationWith.uid !== vendorId)
+        .map(conversation => ({
+          id: conversation.conversationWith.uid,
+          name: conversation.conversationWith.name || `Customer ${conversation.conversationWith.uid}`,
+          lastActive: conversation.updatedAt,
+          avatar: conversation.conversationWith.avatar || null,
+          lastMessage: conversation.lastMessage ? conversation.lastMessage.text : null
+        }));
+      
+      console.log(`Found ${customers.length} customers with conversations for vendor ${vendorId}`);
+      res.json({ customers });
+    } else {
+      res.json({ customers: [] });
+    }
+  } catch (error) {
+    console.error('Error getting vendor customers from CometChat:', error);
+    res.status(500).json({ error: 'Failed to get vendor customers from CometChat' });
+  }
+});
+
 // Manual endpoint to activate customer (for testing - simulates customer sending first message)
 app.post('/api/activate-customer', async (req, res) => {
   try {
