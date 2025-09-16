@@ -439,6 +439,69 @@ app.get('/api/vendor/active', async (req, res) => {
   }
 });
 
+// Get available vendors for customer selection
+app.get('/api/vendors/available', async (req, res) => {
+  try {
+    const vendors = await getVendors();
+    
+    // Format vendors for customer selection UI
+    const availableVendors = vendors.map(vendor => ({
+      uid: vendor.uid,
+      name: vendor.name,
+      email: vendor.email,
+      status: 'online', // TODO: Implement real status checking
+      department: vendor.name // Using name as department for now
+    }));
+    
+    res.json({ 
+      vendors: availableVendors,
+      total: availableVendors.length 
+    });
+  } catch (error) {
+    console.error('Error fetching available vendors:', error);
+    res.status(500).json({ error: 'Failed to fetch available vendors' });
+  }
+});
+
+// Customer selects a specific vendor
+app.post('/api/customer/select-vendor', async (req, res) => {
+  try {
+    const { customerId, vendorId } = req.body;
+    
+    if (!customerId || !vendorId) {
+      return res.status(400).json({ error: 'Customer ID and Vendor ID are required' });
+    }
+    
+    // Verify vendor exists
+    const vendors = await getVendors();
+    const selectedVendor = vendors.find(v => v.uid === vendorId);
+    
+    if (!selectedVendor) {
+      return res.status(404).json({ error: 'Selected vendor not found' });
+    }
+    
+    // Update customer-vendor mapping
+    const mapping = await getCustomerVendorMapping();
+    mapping[customerId] = vendorId;
+    await saveCustomerVendorMapping(mapping);
+    
+    console.log(`🎯 Customer ${customerId} selected vendor ${vendorId} (${selectedVendor.name})`);
+    
+    res.json({ 
+      success: true, 
+      message: `Connected to ${selectedVendor.name}`,
+      vendor: {
+        uid: selectedVendor.uid,
+        name: selectedVendor.name,
+        department: selectedVendor.name
+      }
+    });
+  } catch (error) {
+    console.error('Error selecting vendor:', error);
+    res.status(500).json({ error: 'Failed to select vendor' });
+  }
+});
+
 // Get all vendors (for super user dashboard)
 app.get('/api/vendors', async (req, res) => {
   try {
