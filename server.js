@@ -642,6 +642,29 @@ app.post('/api/activate-customer', async (req, res) => {
   }
 });
 
+// Set vendor as active (called when vendor logs into dashboard)
+app.post('/api/vendor/set-active', async (req, res) => {
+  try {
+    const { uid } = req.body;
+    
+    if (!uid) {
+      return res.status(400).json({ error: 'Vendor UID is required' });
+    }
+    
+    // Mark vendor as active (you can extend this to store in database)
+    console.log(`✅ Vendor ${uid} is now active`);
+    
+    res.json({ 
+      success: true, 
+      message: `Vendor ${uid} marked as active`,
+      timestamp: new Date().toISOString()
+    });
+  } catch (error) {
+    console.error('Error setting vendor active:', error);
+    res.status(500).json({ error: 'Failed to set vendor as active' });
+  }
+});
+
 // Sync all vendors to CometChat
 app.post('/api/sync-all-vendors', async (req, res) => {
   try {
