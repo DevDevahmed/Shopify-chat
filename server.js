@@ -509,17 +509,19 @@ app.post('/api/customer/select-vendor', async (req, res) => {
       return res.status(400).json({ error: 'Customer ID and Vendor ID are required' });
     }
     
-    // Verify vendor exists
+    // Verify vendor exists (vendorId is actually the department name)
     const vendors = await getVendors();
-    const selectedVendor = vendors.find(v => v.uid === vendorId);
+    const selectedVendor = vendors.find(v => v.vendorName === vendorId);
     
     if (!selectedVendor) {
+      console.log(`❌ Vendor not found for department: ${vendorId}`);
+      console.log('Available vendors:', vendors.map(v => ({ uid: v.uid, vendorName: v.vendorName })));
       return res.status(404).json({ error: 'Selected vendor not found' });
     }
     
-    // Update customer-vendor mapping
+    // Update customer-vendor mapping (store vendor uid, not department name)
     const mapping = await getCustomerVendorMapping();
-    mapping[customerId] = vendorId;
+    mapping[customerId] = selectedVendor.uid;
     await saveCustomerVendorMapping(mapping);
     
     console.log(`🎯 Customer ${customerId} selected vendor ${vendorId} (${selectedVendor.name})`);
