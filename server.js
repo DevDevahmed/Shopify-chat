@@ -317,6 +317,7 @@ app.post('/api/sync-customer', async (req, res) => {
 // File paths for data storage
 const CUSTOMER_VENDOR_MAPPING_FILE = path.join(__dirname, 'data', 'customer-vendor-mapping.json');
 const ACTIVE_CUSTOMERS_FILE = path.join(__dirname, 'data', 'active-customers.json');
+const MESSAGES_FILE = path.join(__dirname, 'data', 'messages.json');
 
 // Helper functions for customer-vendor mapping
 async function getCustomerVendorMapping() {
@@ -361,6 +362,26 @@ async function saveActiveCustomers(customers) {
     await fs.writeFile(ACTIVE_CUSTOMERS_FILE, JSON.stringify(customers, null, 2));
   } catch (error) {
     console.error('Failed to save active customers:', error);
+  }
+}
+
+// Helper functions for messages
+async function getMessages() {
+  try {
+    await fs.mkdir(path.dirname(MESSAGES_FILE), { recursive: true });
+    const data = await fs.readFile(MESSAGES_FILE, 'utf8');
+    return JSON.parse(data);
+  } catch {
+    return []; // Return an empty array if the file doesn't exist
+  }
+}
+
+async function saveMessages(messages) {
+  try {
+    await fs.mkdir(path.dirname(MESSAGES_FILE), { recursive: true });
+    await fs.writeFile(MESSAGES_FILE, JSON.stringify(messages, null, 2));
+  } catch (error) {
+    console.error('Failed to save messages:', error);
   }
 }
 
@@ -530,8 +551,10 @@ app.post('/api/send-message', async (req, res) => {
     // Log the message on the server
     console.log(`[${timestamp}] Message from ${customerId} to ${vendorId}: ${message}`);
 
-    // Here you would typically save the message to a database
-    // For now, we'll just acknowledge receipt
+    // Save the message to our messages.json file
+    const messages = await getMessages();
+    messages.push({ customerId, vendorId, message, timestamp });
+    await saveMessages(messages);
 
     res.json({ success: true, message: 'Message received' });
 
