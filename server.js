@@ -642,6 +642,33 @@ app.post('/api/activate-customer', async (req, res) => {
   }
 });
 
+// Sync all vendors to CometChat
+app.post('/api/sync-all-vendors', async (req, res) => {
+  try {
+    const vendors = await getVendors();
+    const results = [];
+    
+    for (const vendor of vendors) {
+      try {
+        await ensureVendorExists(vendor);
+        results.push({ uid: vendor.uid, name: vendor.name, status: 'success' });
+      } catch (error) {
+        results.push({ uid: vendor.uid, name: vendor.name, status: 'failed', error: error.message });
+      }
+    }
+    
+    res.json({ 
+      message: 'Vendor sync completed',
+      results,
+      total: vendors.length,
+      successful: results.filter(r => r.status === 'success').length
+    });
+  } catch (error) {
+    console.error('Error syncing vendors:', error);
+    res.status(500).json({ error: 'Failed to sync vendors' });
+  }
+});
+
 // Debug endpoint to test CometChat connection
 app.get('/api/debug/cometchat', async (req, res) => {
   try {
