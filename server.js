@@ -695,7 +695,7 @@ app.post('/api/activate-customer', async (req, res) => {
 });
 
 // Set vendor as active (called when vendor logs into dashboard)
-app.post('/api/vendor/set-active', async (req, res) => {
+app.post('/api/vendors/set-active', async (req, res) => {
   try {
     const { uid } = req.body;
     if (!uid) {
