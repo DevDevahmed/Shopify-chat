@@ -34,7 +34,6 @@ async function cometChatAPI(endpoint, method = 'GET', data = null) {
     if (!process.env.COMETCHAT_APP_ID || !process.env.COMETCHAT_AUTH_KEY || !process.env.COMETCHAT_REGION) {
       throw new Error('Missing CometChat environment variables. Please check COMETCHAT_APP_ID, COMETCHAT_AUTH_KEY, and COMETCHAT_REGION');
     }
-    
     const config = {
       method,
       url: `${COMETCHAT_API_BASE}${endpoint}`,
@@ -45,11 +44,9 @@ async function cometChatAPI(endpoint, method = 'GET', data = null) {
         'apiKey': process.env.COMETCHAT_AUTH_KEY
       }
     };
-    
     if (data) {
       config.data = data;
     }
-    
     console.log(`CometChat API Call: ${method} ${config.url}`);
     const response = await axios(config);
     console.log(`CometChat API Success: ${response.status}`);
@@ -122,7 +119,6 @@ app.post('/api/sync-vendors', async (req, res) => {
   try {
     const vendors = [];
     const stream = Readable.from(req.body.toString());
-
     await new Promise((resolve, reject) => {
       stream
         .pipe(csv())
@@ -146,7 +142,6 @@ app.post('/api/sync-vendors', async (req, res) => {
 
     for (const vendor of vendors) {
       if (!vendor.email || !vendor.name || !vendor.id) continue;
-
       const existing = existingVendors.find(v => v.email === vendor.email);
       const uid = vendor.id;
 
@@ -154,20 +149,17 @@ app.post('/api/sync-vendors', async (req, res) => {
         // Generate unique secure password for each new vendor
         const plainPassword = generateSecurePassword();
         const hashedPassword = await bcrypt.hash(plainPassword, 10);
-        
         const newVendor = {
           email: vendor.email,
           name: vendor.name,
           password: hashedPassword,
           uid
         };
-        
         existingVendors.push(newVendor);
         newVendorsWithPasswords.push({
           ...newVendor,
           plainPassword // Store temporarily for response
         });
-        
         console.log(`🆕 Added vendor: ${vendor.name} (${vendor.email}) with password: ${plainPassword}`);
       } else {
         if (existing.name !== vendor.name) {
@@ -191,7 +183,6 @@ app.post('/api/sync-vendors', async (req, res) => {
         password: v.plainPassword
       }))
     });
-
   } catch (error) {
     console.error("CSV Sync Error:", error);
     res.status(500).json({ error: "Failed to sync vendors from CSV" });
@@ -200,9 +191,9 @@ app.post('/api/sync-vendors', async (req, res) => {
 
 app.post('/api/vendor/login', async (req, res) => {
   const { email, password } = req.body;
-
   const vendors = await getVendors();
   const vendor = vendors.find(v => v.email === email);
+
   if (!vendor) {
     return res.status(401).json({ error: "Vendor not found" });
   }
@@ -213,7 +204,7 @@ app.post('/api/vendor/login', async (req, res) => {
   }
 
   await ensureVendorExists(vendor);
-  
+
   try {
     // Create auth token for vendor using CometChat REST API
     const tokenResponse = await cometChatAPI(`/users/${vendor.uid}/auth_tokens`, 'POST');
@@ -236,24 +227,20 @@ app.get('/api/vendor/uid/:email', async (req, res) => {
 app.post('/api/cometchat-webhook', async (req, res) => {
   try {
     const { data } = req.body;
-    
     // Check if this is a message event from a customer
     if (data && data.message && data.message.sender) {
       const senderId = data.message.sender.uid;
       const receiverId = data.message.receiver?.uid;
-      
       console.log(`💬 Message webhook: ${senderId} → ${receiverId}`);
-      
+
       // Check if sender is a customer (not a vendor)
       try {
         const senderData = await cometChatAPI(`/users/${senderId}`);
         const isCustomer = senderData.data?.metadata?.role === 'customer';
-        
         if (isCustomer) {
           // Get customer-vendor mapping to find assigned vendor
           const mapping = await getCustomerVendorMapping();
           const assignedVendor = mapping[senderId];
-          
           if (assignedVendor) {
             // Mark customer as active (has sent a message)
             await markCustomerAsActive(senderId, assignedVendor);
@@ -266,7 +253,6 @@ app.post('/api/cometchat-webhook', async (req, res) => {
         console.error('Error processing message webhook:', error.message);
       }
     }
-    
     res.json({ success: true, message: 'Webhook processed' });
   } catch (error) {
     console.error('CometChat webhook error:', error);
@@ -280,7 +266,6 @@ app.post('/api/sync-customer', async (req, res) => {
 
   try {
     let customerExists = false;
-    
     // Check if customer already exists
     try {
       await cometChatAPI(`/users/${id}`);
@@ -295,7 +280,7 @@ app.post('/api/sync-customer', async (req, res) => {
       await cometChatAPI('/users', 'POST', userData);
       console.log(`✅ Created customer: ${first_name} (${email})`);
     }
-    
+
     // Auto-assign customer to a vendor if not already assigned
     const mapping = await getCustomerVendorMapping();
     if (!mapping[id]) {
@@ -304,23 +289,20 @@ app.post('/api/sync-customer', async (req, res) => {
         // Simple round-robin assignment - assign to vendor with least customers
         const vendorCustomerCounts = {};
         vendors.forEach(v => vendorCustomerCounts[v.uid] = 0);
-        
         Object.values(mapping).forEach(vendorId => {
           if (vendorCustomerCounts[vendorId] !== undefined) {
             vendorCustomerCounts[vendorId]++;
           }
         });
-        
         const leastBusyVendor = Object.keys(vendorCustomerCounts).reduce((a, b) => 
           vendorCustomerCounts[a] <= vendorCustomerCounts[b] ? a : b
         );
-        
         mapping[id] = leastBusyVendor;
         await saveCustomerVendorMapping(mapping);
         console.log(`🔗 Auto-assigned customer ${id} to vendor ${leastBusyVendor}`);
       }
     }
-    
+
     res.json({ 
       success: true, 
       message: customerExists ? "Customer already exists" : "Customer created successfully",
@@ -407,7 +389,6 @@ async function saveMessages(messages) {
 async function markCustomerAsActive(customerId, vendorId) {
   const activeCustomers = await getActiveCustomers();
   const now = new Date().toISOString();
-  
   if (!activeCustomers[customerId]) {
     activeCustomers[customerId] = {
       vendorId,
@@ -418,7 +399,6 @@ async function markCustomerAsActive(customerId, vendorId) {
   } else {
     activeCustomers[customerId].lastMessageAt = now;
   }
-  
   await saveActiveCustomers(activeCustomers);
   return activeCustomers[customerId];
 }
@@ -428,21 +408,17 @@ app.get('/api/vendor/:vendorUid/customers', async (req, res) => {
   try {
     const { vendorUid } = req.params;
     const activeCustomers = await getActiveCustomers();
-    
     // Find only ACTIVE customers assigned to this vendor (who have sent messages)
     const activeCustomerIds = Object.keys(activeCustomers).filter(customerId => 
       activeCustomers[customerId].vendorId === vendorUid
     );
-    
     console.log(`Vendor ${vendorUid} has ${activeCustomerIds.length} active customers (who sent messages)`);
-    
     // Fetch customer details from CometChat
     const customers = [];
     for (const customerId of activeCustomerIds) {
       try {
         const customer = await cometChatAPI(`/users/${customerId}`);
         const customerData = customer.data;
-        
         // Add activity info
         customerData.activityInfo = activeCustomers[customerId];
         customers.push(customerData);
@@ -450,7 +426,6 @@ app.get('/api/vendor/:vendorUid/customers', async (req, res) => {
         console.warn(`Active customer ${customerId} not found in CometChat:`, error.message);
       }
     }
-    
     res.json({ 
       customers,
       totalActive: customers.length,
@@ -466,15 +441,12 @@ app.get('/api/vendor/:vendorUid/customers', async (req, res) => {
 app.post('/api/assign-customer-to-vendor', async (req, res) => {
   try {
     const { customerId, vendorId } = req.body;
-    
     if (!customerId || !vendorId) {
       return res.status(400).json({ error: 'Customer ID and Vendor ID are required' });
     }
-    
     const mapping = await getCustomerVendorMapping();
     mapping[customerId] = vendorId;
     await saveCustomerVendorMapping(mapping);
-    
     res.json({ success: true, message: `Customer ${customerId} assigned to vendor ${vendorId}` });
   } catch (error) {
     console.error('Error assigning customer to vendor:', error);
@@ -498,7 +470,6 @@ app.get('/api/vendor/active', async (req, res) => {
 app.get('/api/vendors/available', async (req, res) => {
   try {
     const vendors = await getVendors();
-    
     // Format vendors for customer selection UI
     const availableVendors = vendors.map(vendor => ({
       uid: vendor.uid,
@@ -507,7 +478,6 @@ app.get('/api/vendors/available', async (req, res) => {
       status: 'online', // TODO: Implement real status checking
       department: vendor.vendorName // Use vendorName as the department
     }));
-    
     res.json({ 
       vendors: availableVendors,
       total: availableVendors.length 
@@ -522,28 +492,22 @@ app.get('/api/vendors/available', async (req, res) => {
 app.post('/api/customer/select-vendor', async (req, res) => {
   try {
     const { customerId, vendorId } = req.body;
-    
     if (!customerId || !vendorId) {
       return res.status(400).json({ error: 'Customer ID and Vendor ID are required' });
     }
-    
     // Verify vendor exists (vendorId is actually the department name)
     const vendors = await getVendors();
     const selectedVendor = vendors.find(v => v.vendorName === vendorId);
-    
     if (!selectedVendor) {
       console.log(`❌ Vendor not found for department: ${vendorId}`);
       console.log('Available vendors:', vendors.map(v => ({ uid: v.uid, vendorName: v.vendorName })));
       return res.status(404).json({ error: 'Selected vendor not found' });
     }
-    
     // Update customer-vendor mapping (store vendor uid, not department name)
     const mapping = await getCustomerVendorMapping();
     mapping[customerId] = selectedVendor.uid;
     await saveCustomerVendorMapping(mapping);
-    
     console.log(`🎯 Customer ${customerId} selected vendor ${vendorId} (${selectedVendor.name})`);
-    
     res.json({ 
       success: true, 
       message: `Connected to ${selectedVendor.name}`,
@@ -563,32 +527,25 @@ app.post('/api/customer/select-vendor', async (req, res) => {
 app.post('/api/send-message', async (req, res) => {
   try {
     const { customerId, vendorId, message, timestamp } = req.body;
-
     if (!customerId || !vendorId || !message || !timestamp) {
       return res.status(400).json({ error: 'Missing required fields for sending a message' });
     }
-
     // Log the message on the server
     console.log(`[${timestamp}] Message from ${customerId} to ${vendorId}: ${message}`);
-
     // Save the message to our messages.json file
     const messages = await getMessages();
     messages.push({ customerId, vendorId, message, timestamp });
     await saveMessages(messages);
-
     // Mark customer as active so they appear in vendor dashboard
     await markCustomerAsActive(customerId, vendorId);
     console.log(`✅ Customer ${customerId} marked as active for vendor ${vendorId}`);
-
     // Create customer in CometChat if they don't exist (for vendor dashboard messaging)
     try {
       await ensureCustomerExists(customerId);
     } catch (error) {
       console.error('Failed to create customer in CometChat:', error);
     }
-
     res.json({ success: true, message: 'Message received' });
-
   } catch (error) {
     console.error('Error sending message:', error);
     res.status(500).json({ error: 'Failed to send message' });
@@ -612,17 +569,14 @@ app.get('/api/customers', async (req, res) => {
     // Use CometChat REST API to fetch users
     const response = await cometChatAPI('/users?limit=100');
     const allUsers = response.data || [];
-    
     // Filter for customers only
     const customers = allUsers.filter(user => 
       user.metadata && user.metadata.role === 'customer'
     );
-    
     console.log(`Found ${customers.length} customers out of ${allUsers.length} total users`);
     res.json({ customers });
   } catch (error) {
     console.error('Error fetching customers:', error.response?.data || error.message);
-    
     // If CometChat API fails, return empty array for now
     // This allows the system to work even if no customers exist yet
     res.json({ customers: [], message: 'No customers found or CometChat API unavailable' });
@@ -640,17 +594,20 @@ app.get('/api/customer-vendor-assignments', async (req, res) => {
   }
 });
 
-// Get active customers for a vendor (customers who have sent messages) - fetch from CometChat
+// ✅ FIXED: Get active customers for a vendor (customers who have sent messages) - fetch from CometChat
 app.get('/api/vendors/:vendorId/customers', async (req, res) => {
   try {
     const { vendorId } = req.params;
-    
     // Get conversations for this vendor from CometChat
-    const conversationsResponse = await cometChatAPI(`/users/${vendorId}/conversations?conversationType=user&limit=100`);
-    
+    // REMOVED 'conversationType=user' from URL for more reliable fetching
+    const conversationsResponse = await cometChatAPI(`/users/${vendorId}/conversations?limit=100`);
     if (conversationsResponse.data && conversationsResponse.data.data) {
       const customers = conversationsResponse.data.data
-        .filter(conversation => conversation.conversationWith && conversation.conversationWith.uid !== vendorId)
+        .filter(conversation => 
+          conversation.conversationWith && 
+          conversation.conversationWith.uid !== vendorId && // Exclude self
+          conversation.conversationType === 'user' // Ensure it's a 1-on-1 user conversation
+        )
         .map(conversation => ({
           id: conversation.conversationWith.uid,
           name: conversation.conversationWith.name || `Customer ${conversation.conversationWith.uid}`,
@@ -658,10 +615,10 @@ app.get('/api/vendors/:vendorId/customers', async (req, res) => {
           avatar: conversation.conversationWith.avatar || null,
           lastMessage: conversation.lastMessage ? conversation.lastMessage.text : null
         }));
-      
       console.log(`Found ${customers.length} customers with conversations for vendor ${vendorId}`);
       res.json({ customers });
     } else {
+      console.log(`No conversation data found for vendor ${vendorId}`);
       res.json({ customers: [] });
     }
   } catch (error) {
@@ -674,22 +631,17 @@ app.get('/api/vendors/:vendorId/customers', async (req, res) => {
 app.post('/api/activate-customer', async (req, res) => {
   try {
     const { customerId } = req.body;
-    
     if (!customerId) {
       return res.status(400).json({ error: 'Customer ID is required' });
     }
-    
     // Get customer-vendor mapping
     const mapping = await getCustomerVendorMapping();
     const assignedVendor = mapping[customerId];
-    
     if (!assignedVendor) {
       return res.status(404).json({ error: 'Customer not found or not assigned to any vendor' });
     }
-    
     // Mark customer as active
     const activityInfo = await markCustomerAsActive(customerId, assignedVendor);
-    
     res.json({
       success: true,
       message: `Customer ${customerId} activated for vendor ${assignedVendor}`,
@@ -707,14 +659,11 @@ app.post('/api/activate-customer', async (req, res) => {
 app.post('/api/vendor/set-active', async (req, res) => {
   try {
     const { uid } = req.body;
-    
     if (!uid) {
       return res.status(400).json({ error: 'Vendor UID is required' });
     }
-    
     // Mark vendor as active (you can extend this to store in database)
     console.log(`✅ Vendor ${uid} is now active`);
-    
     res.json({ 
       success: true, 
       message: `Vendor ${uid} marked as active`,
@@ -731,7 +680,6 @@ app.post('/api/sync-all-vendors', async (req, res) => {
   try {
     const vendors = await getVendors();
     const results = [];
-    
     for (const vendor of vendors) {
       try {
         await ensureVendorExists(vendor);
@@ -740,7 +688,6 @@ app.post('/api/sync-all-vendors', async (req, res) => {
         results.push({ uid: vendor.uid, name: vendor.name, status: 'failed', error: error.message });
       }
     }
-    
     res.json({ 
       message: 'Vendor sync completed',
       results,
@@ -762,10 +709,8 @@ app.get('/api/debug/cometchat', async (req, res) => {
     console.log('- COMETCHAT_AUTH_KEY:', process.env.COMETCHAT_AUTH_KEY ? '✅ Set' : '❌ Missing');
     console.log('- COMETCHAT_REGION:', process.env.COMETCHAT_REGION ? '✅ Set' : '❌ Missing');
     console.log('- API Base URL:', COMETCHAT_API_BASE);
-    
     // Test basic API connectivity
     const response = await cometChatAPI('/users?limit=1');
-    
     res.json({
       success: true,
       message: 'CometChat connection successful',
