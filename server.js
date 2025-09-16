@@ -321,31 +321,47 @@ const ACTIVE_CUSTOMERS_FILE = path.join(__dirname, 'data', 'active-customers.jso
 // Helper functions for customer-vendor mapping
 async function getCustomerVendorMapping() {
   try {
+    await fs.mkdir(path.dirname(CUSTOMER_VENDOR_MAPPING_FILE), { recursive: true });
     const data = await fs.readFile(CUSTOMER_VENDOR_MAPPING_FILE, 'utf8');
     return JSON.parse(data);
   } catch {
-    return {}; // customerId -> vendorId mapping
+    // File doesn't exist, create it with empty mapping
+    const emptyMapping = {};
+    await saveCustomerVendorMapping(emptyMapping);
+    return emptyMapping;
   }
 }
 
 async function saveCustomerVendorMapping(mapping) {
-  await fs.mkdir(path.dirname(CUSTOMER_VENDOR_MAPPING_FILE), { recursive: true });
-  await fs.writeFile(CUSTOMER_VENDOR_MAPPING_FILE, JSON.stringify(mapping, null, 2));
+  try {
+    await fs.mkdir(path.dirname(CUSTOMER_VENDOR_MAPPING_FILE), { recursive: true });
+    await fs.writeFile(CUSTOMER_VENDOR_MAPPING_FILE, JSON.stringify(mapping, null, 2));
+  } catch (error) {
+    console.error('Failed to save customer-vendor mapping:', error);
+  }
 }
 
 // Helper functions for active customers (who have sent messages)
 async function getActiveCustomers() {
   try {
+    await fs.mkdir(path.dirname(ACTIVE_CUSTOMERS_FILE), { recursive: true });
     const data = await fs.readFile(ACTIVE_CUSTOMERS_FILE, 'utf8');
     return JSON.parse(data);
   } catch {
-    return {}; // customerId -> { vendorId, firstMessageAt, lastMessageAt }
+    // File doesn't exist, create it with empty data
+    const emptyCustomers = {};
+    await saveActiveCustomers(emptyCustomers);
+    return emptyCustomers;
   }
 }
 
-async function saveActiveCustomers(activeCustomers) {
-  await fs.mkdir(path.dirname(ACTIVE_CUSTOMERS_FILE), { recursive: true });
-  await fs.writeFile(ACTIVE_CUSTOMERS_FILE, JSON.stringify(activeCustomers, null, 2));
+async function saveActiveCustomers(customers) {
+  try {
+    await fs.mkdir(path.dirname(ACTIVE_CUSTOMERS_FILE), { recursive: true });
+    await fs.writeFile(ACTIVE_CUSTOMERS_FILE, JSON.stringify(customers, null, 2));
+  } catch (error) {
+    console.error('Failed to save active customers:', error);
+  }
 }
 
 // Mark customer as active (has sent a message)
