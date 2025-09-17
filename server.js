@@ -711,6 +711,26 @@ app.get('/api/vendors', async (req, res) => {
   }
 });
 
+// Set vendor as active (called when vendor logs into dashboard)
+app.post('/api/vendors/set-active', async (req, res) => {
+  try {
+    const { uid } = req.body;
+    if (!uid) {
+      return res.status(400).json({ error: 'Vendor UID is required' });
+    }
+    // Mark vendor as active (you can extend this to store in database)
+    console.log(`✅ Vendor ${uid} is now active`);
+    res.json({ 
+      success: true, 
+      message: `Vendor ${uid} marked as active`,
+      timestamp: new Date().toISOString()
+    });
+  } catch (error) {
+    console.error('Error setting vendor active:', error);
+    res.status(500).json({ error: 'Failed to set vendor as active' });
+  }
+});
+
 // Get available vendors (alias for Shopify widget compatibility)
 app.get('/api/vendors/available', async (req, res) => {
   try {
