@@ -4,6 +4,12 @@ const cors = require('cors');
 const fs = require('fs').promises;
 const path = require('path');
 const bcrypt = require('bcryptjs');
+const mongoose = require('mongoose');
+const { connectMongoDB } = require('./config/database');
+const Vendor = require('./models/Vendor');
+const vendorManagementService = require('./services/vendorManagementService');
+// Internal vendor management system - no external APIs required
+console.log('✅ Using internal vendor management system (no external API costs)');
 const axios = require('axios');
 const csv = require('csv-parser');
 const { Readable } = require('stream');
@@ -30,9 +36,20 @@ const COMETCHAT_API_BASE = `https://api-${process.env.COMETCHAT_REGION}.cometcha
 // Helper function to make CometChat API calls
 async function cometChatAPI(endpoint, method = 'GET', data = null) {
   try {
-    // Validate required environment variables
+// Connect to MongoDB Atlas
+connectMongoDB();
+
+    // Validate environment variables
     if (!process.env.COMETCHAT_APP_ID || !process.env.COMETCHAT_AUTH_KEY || !process.env.COMETCHAT_REGION) {
-      throw new Error('Missing CometChat environment variables. Please check COMETCHAT_APP_ID, COMETCHAT_AUTH_KEY, and COMETCHAT_REGION');
+      console.error('❌ Missing required CometChat environment variables');
+      console.log('Required: COMETCHAT_APP_ID, COMETCHAT_AUTH_KEY, COMETCHAT_REGION');
+      process.exit(1);
+    }
+
+    // Validate ShipTurtle environment variables
+    if (!process.env.SHIPTURTLE_API_KEY || !process.env.SHIPTURTLE_STORE_ID) {
+      console.warn('⚠️ ShipTurtle API credentials not configured');
+      console.log('Optional: SHIPTURTLE_API_KEY, SHIPTURTLE_STORE_ID, SHIPTURTLE_API_URL');
     }
     const config = {
       method,
@@ -522,365 +539,312 @@ app.get('/api/vendor/active', async (req, res) => {
   } catch (error) {
     res.json({ uid: 'default_vendor' });
   }
-});
 
 // Get available vendors for customer selection
 app.get('/api/vendors/available', async (req, res) => {
   try {
-    const vendors = await getVendors();
-    
-    // Format vendors for customer selection UI
-    const availableVendors = vendors.map(vendor => ({
-      uid: vendor.uid,
-      name: vendor.name,
-      email: vendor.email,
-      status: 'online', // TODO: Implement real status checking
-      department: vendor.name || vendor.vendorName || vendor.uid // Use name as department, fallback to vendorName or uid
-    }));
-    
-    console.log(`📋 Available vendors for customer selection:`, availableVendors.map(v => ({ uid: v.uid, name: v.name, department: v.department })));
-    
-    res.json({ 
-      vendors: availableVendors,
-      total: availableVendors.length 
+    const result = await vendorManagementService.getAvailableVendors();
+    if (result.success) {
+      res.json({
+        vendors: result.vendors,
+        total: result.total
+      });
+    } else {
+      res.status(500).json(result);
+    }
+  } catch (error) {
+    console.error('❌ Failed to fetch available vendors:', error);
+    res.status(500).json({
+      error: 'Failed to fetch available vendors'
     });
-  } catch (error) {
-    console.error('Error fetching available vendors:', error);
-    res.status(500).json({ error: 'Failed to fetch available vendors' });
   }
 });
 
-// Customer selects a specific vendor
-app.post('/api/customer/select-vendor', async (req, res) => {
+// Get all vendors (admin only endpoint)
+app.get('/api/admin/vendors', async (req, res) => {
   try {
-    const { customerId, vendorId } = req.body;
-    if (!customerId || !vendorId) {
-      return res.status(400).json({ error: 'Customer ID and Vendor ID are required' });
+    // Simple admin check (you can enhance this with proper JWT later)
+    const authHeader = req.headers.authorization;
+    if (!authHeader || !authHeader.startsWith('Bearer admin_')) {
+      return res.status(403).json({
+        success: false,
+        error: 'Admin access required'
+      });
     }
-    // Verify vendor exists (vendorId is actually the department name)
-    const vendors = await getVendors();
-    const selectedVendor = vendors.find(v => v.vendorName === vendorId);
-    if (!selectedVendor) {
-      console.log(`❌ Vendor not found for department: ${vendorId}`);
-      console.log('Available vendors:', vendors.map(v => ({ uid: v.uid, vendorName: v.vendorName })));
-      return res.status(404).json({ error: 'Selected vendor not found' });
+    
+    const result = await vendorManagementService.getAllVendors(req.query);
+    if (result.success) {
+      res.json({
+        success: true,
+        vendors: result.vendors,
+        total: result.total
+      });
+    } else {
+      res.status(500).json(result);
     }
-    // Update customer-vendor mapping (store vendor uid, not department name)
-    const mapping = await getCustomerVendorMapping();
-    mapping[customerId] = selectedVendor.uid;
-    await saveCustomerVendorMapping(mapping);
-    console.log(`🎯 Customer ${customerId} selected vendor ${vendorId} (${selectedVendor.name})`);
-    res.json({ 
-      success: true, 
-      message: `Connected to ${selectedVendor.name}`,
-      vendor: {
-        uid: selectedVendor.uid,
-        name: selectedVendor.name,
-        department: selectedVendor.name
-      }
+  } catch (error) {
+    console.error('❌ Failed to fetch vendors:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to fetch vendors'
     });
-  } catch (error) {
-    console.error('Error selecting vendor:', error);
-    res.status(500).json({ error: 'Failed to select vendor' });
   }
 });
 
-// Customer sends a message to a vendor
-app.post('/api/send-message', async (req, res) => {
+// Approve vendor (admin only)
+app.post('/api/admin/vendors/:vendorId/approve', async (req, res) => {
   try {
-    const { customerId, vendorId, message, timestamp } = req.body;
-    if (!customerId || !vendorId || !message || !timestamp) {
-      return res.status(400).json({ error: 'Missing required fields for sending a message' });
+    // Admin authentication check
+    const authHeader = req.headers.authorization;
+    if (!authHeader || !authHeader.startsWith('Bearer admin_')) {
+      return res.status(403).json({
+        success: false,
+        error: 'Admin access required'
+      });
     }
-    // Log the message on the server
-    console.log(`[${timestamp}] Message from ${customerId} to ${vendorId}: ${message}`);
-    // Save the message to our messages.json file
-    const messages = await getMessages();
-    messages.push({ customerId, vendorId, message, timestamp });
-    await saveMessages(messages);
-    // Mark customer as active so they appear in vendor dashboard
-    await markCustomerAsActive(customerId, vendorId);
-    console.log(`✅ Customer ${customerId} marked as active for vendor ${vendorId}`);
-    // Create customer in CometChat if they don't exist (for vendor dashboard messaging)
-    try {
-      await ensureCustomerExists(customerId);
-    } catch (error) {
-      console.error('Failed to create customer in CometChat:', error);
+    
+    const { vendorId } = req.params;
+    const result = await vendorManagementService.approveVendor(vendorId, 'admin');
+    
+    if (result.success) {
+      res.json(result);
+    } else {
+      res.status(404).json(result);
     }
-    res.json({ success: true, message: 'Message received' });
   } catch (error) {
-    console.error('Error sending message:', error);
-    res.status(500).json({ error: 'Failed to send message' });
+    console.error('❌ Failed to approve vendor:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Internal server error'
+    });
   }
 });
 
-// Get all vendors (for super user dashboard)
-app.get('/api/vendors', async (req, res) => {
+// Reject vendor (admin only)
+app.post('/api/admin/vendors/:vendorId/reject', async (req, res) => {
   try {
-    const vendors = await getVendors();
-    res.json({ vendors });
+    // Admin authentication check
+    const authHeader = req.headers.authorization;
+    if (!authHeader || !authHeader.startsWith('Bearer admin_')) {
+      return res.status(403).json({
+        success: false,
+        error: 'Admin access required'
+      });
+    }
+    
+    const { vendorId } = req.params;
+    const { reason } = req.body;
+    const result = await vendorManagementService.rejectVendor(vendorId, reason, 'admin');
+    
+    if (result.success) {
+      res.json(result);
+    } else {
+      res.status(404).json(result);
+    }
   } catch (error) {
-    console.error('Error fetching vendors:', error);
-    res.status(500).json({ error: 'Failed to fetch vendors' });
+    console.error('❌ Failed to reject vendor:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Internal server error'
+    });
   }
 });
 
-// Get all customers (for super user dashboard)
-app.get('/api/customers', async (req, res) => {
-  try {
-    // Use CometChat REST API to fetch users
-    const response = await cometChatAPI('/users?limit=100');
-    const allUsers = response.data || [];
-    // Filter for customers only
-    const customers = allUsers.filter(user => 
-      user.metadata && user.metadata.role === 'customer'
-    );
-    console.log(`Found ${customers.length} customers out of ${allUsers.length} total users`);
-    res.json({ customers });
-  } catch (error) {
-    console.error('Error fetching customers:', error.response?.data || error.message);
-    // If CometChat API fails, return empty array for now
-    // This allows the system to work even if no customers exist yet
-    res.json({ customers: [], message: 'No customers found or CometChat API unavailable' });
-  }
-});
-
-// Get all customer-vendor assignments (for super user dashboard)
-app.get('/api/customer-vendor-assignments', async (req, res) => {
-  try {
-    const assignments = await getCustomerVendorMapping();
-    res.json({ assignments });
-  } catch (error) {
-    console.error('Error fetching assignments:', error);
-    res.status(500).json({ error: 'Failed to fetch assignments' });
-  }
-});
-
-// ✅ FIXED: Get active customers for a vendor (customers who have sent messages) - fetch from CometChat
-app.get('/api/vendors/:vendorId/customers', async (req, res) => {
+// Toggle vendor status (activate/suspend)
+app.post('/api/vendors/:vendorId/toggle-status', async (req, res) => {
   try {
     const { vendorId } = req.params;
-    // Get conversations for this vendor from CometChat
-    // REMOVED 'conversationType=user' from URL for more reliable fetching
-    const conversationsResponse = await cometChatAPI(`/users/${vendorId}/conversations?limit=100`);
-    if (conversationsResponse.data && conversationsResponse.data.data) {
-      const customers = conversationsResponse.data.data
-        .filter(conversation => 
-          conversation.conversationWith && 
-          conversation.conversationWith.uid !== vendorId && // Exclude self
-          conversation.conversationType === 'user' // Ensure it's a 1-on-1 user conversation
-        )
-        .map(conversation => ({
-          id: conversation.conversationWith.uid,
-          name: conversation.conversationWith.name || `Customer ${conversation.conversationWith.uid}`,
-          lastActive: conversation.updatedAt,
-          avatar: conversation.conversationWith.avatar || null,
-          lastMessage: conversation.lastMessage ? conversation.lastMessage.text : null
-        }));
-      console.log(`Found ${customers.length} customers with conversations for vendor ${vendorId}`);
-      res.json({ customers });
+    const { isActive } = req.body;
+    const result = await vendorManagementService.toggleVendorStatus(vendorId, isActive);
+    
+    if (result.success) {
+      res.json(result);
     } else {
-      console.log(`No conversation data found for vendor ${vendorId}`);
-      res.json({ customers: [] });
+      res.status(404).json(result);
     }
   } catch (error) {
-    console.error('Error getting vendor customers from CometChat:', error);
-    res.status(500).json({ error: 'Failed to get vendor customers from CometChat' });
-  }
-});
-
-// Manual endpoint to activate customer (for testing - simulates customer sending first message)
-app.post('/api/activate-customer', async (req, res) => {
-  try {
-    const { customerId } = req.body;
-    if (!customerId) {
-      return res.status(400).json({ error: 'Customer ID is required' });
-    }
-    // Get customer-vendor mapping
-    const mapping = await getCustomerVendorMapping();
-    const assignedVendor = mapping[customerId];
-    if (!assignedVendor) {
-      return res.status(404).json({ error: 'Customer not found or not assigned to any vendor' });
-    }
-    // Mark customer as active
-    const activityInfo = await markCustomerAsActive(customerId, assignedVendor);
-    res.json({
-      success: true,
-      message: `Customer ${customerId} activated for vendor ${assignedVendor}`,
-      customerId,
-      vendorId: assignedVendor,
-      activityInfo
+    console.error('❌ Failed to toggle vendor status:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Internal server error'
     });
-  } catch (error) {
-    console.error('Error activating customer:', error);
-    res.status(500).json({ error: 'Failed to activate customer' });
   }
 });
 
-// Set vendor as active (called when vendor logs into dashboard)
-app.post('/api/vendors/set-active', async (req, res) => {
+// Get vendor statistics (admin only)
+app.get('/api/admin/stats', async (req, res) => {
   try {
-    const { uid } = req.body;
-    if (!uid) {
-      return res.status(400).json({ error: 'Vendor UID is required' });
-    }
-    // Mark vendor as active (you can extend this to store in database)
-    console.log(`✅ Vendor ${uid} is now active`);
-    res.json({ 
-      success: true, 
-      message: `Vendor ${uid} marked as active`,
-      timestamp: new Date().toISOString()
-    });
-  } catch (error) {
-    console.error('Error setting vendor active:', error);
-    res.status(500).json({ error: 'Failed to set vendor as active' });
-  }
-});
-
-// Sync all vendors to CometChat
-app.post('/api/sync-all-vendors', async (req, res) => {
-  try {
-    const vendors = await getVendors();
-    const results = [];
-    for (const vendor of vendors) {
-      try {
-        await ensureVendorExists(vendor);
-        results.push({ uid: vendor.uid, name: vendor.name, status: 'success' });
-      } catch (error) {
-        results.push({ uid: vendor.uid, name: vendor.name, status: 'failed', error: error.message });
-      }
-    }
-    res.json({ 
-      message: 'Vendor sync completed',
-      results,
-      total: vendors.length,
-      successful: results.filter(r => r.status === 'success').length
-    });
-  } catch (error) {
-    console.error('Error syncing vendors:', error);
-    res.status(500).json({ error: 'Failed to sync vendors' });
-  }
-});
-
-// Test endpoint to create a test customer and send a message to vendor_001
-app.post('/api/test/create-customer-conversation', async (req, res) => {
-  try {
-    const testCustomerId = 'test_customer_' + Date.now();
-    const vendorId = 'vendor_001';
-    
-    console.log(`🧪 Creating test customer ${testCustomerId} and conversation with ${vendorId}`);
-    
-    // 1. Create test customer in CometChat
-    const customerData = {
-      uid: testCustomerId,
-      name: `Test Customer ${testCustomerId.slice(-4)}`,
-      metadata: { role: 'customer', email: 'test@example.com' }
-    };
-    
-    try {
-      await cometChatAPI('/users', 'POST', customerData);
-      console.log(`✅ Created test customer: ${testCustomerId}`);
-    } catch (createError) {
-      if (createError.response?.data?.error?.code !== 'ERR_UID_ALREADY_EXISTS') {
-        throw createError;
-      }
-      console.log(`👤 Test customer already exists: ${testCustomerId}`);
-    }
-    
-    // 2. Ensure vendor exists
-    try {
-      await cometChatAPI(`/users/${vendorId}`);
-      console.log(`✅ Vendor ${vendorId} exists`);
-    } catch (vendorError) {
-      console.log(`❌ Vendor ${vendorId} not found:`, vendorError.response?.data);
-      return res.status(404).json({ error: `Vendor ${vendorId} not found in CometChat` });
-    }
-    
-    // 3. Send a test message from customer to vendor using CometChat REST API
-    const messageData = {
-      category: 'message',
-      type: 'text',
-      data: {
-        text: `Hello! This is a test message from ${customerData.name}. Can you help me?`
-      }
-    };
-    
-    try {
-      const messageResponse = await cometChatAPI(`/users/${testCustomerId}/messages`, 'POST', {
-        ...messageData,
-        receiver: vendorId,
-        receiverType: 'user'
+    // Admin authentication check
+    const authHeader = req.headers.authorization;
+    if (!authHeader || !authHeader.startsWith('Bearer admin_')) {
+      return res.status(403).json({
+        success: false,
+        error: 'Admin access required'
       });
-      console.log(`✅ Test message sent from ${testCustomerId} to ${vendorId}`);
-      
-      // 4. Mark customer as active in our local storage
-      await markCustomerAsActive(testCustomerId, vendorId);
+    }
+    
+    const result = await vendorManagementService.getVendorStats();
+    
+    if (result.success) {
+      res.json(result.stats);
+    } else {
+      res.status(500).json(result);
+    }
+  } catch (error) {
+    console.error('❌ Failed to get vendor stats:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Internal server error'
+    });
+  }
+});
+
+// Admin authentication (separate from vendors)
+app.post('/api/admin/login', async (req, res) => {
+  try {
+    const { email, password } = req.body;
+    
+    if (!email || !password) {
+      return res.status(400).json({
+        success: false,
+        error: 'Email and password are required'
+      });
+    }
+    
+    // Hardcoded admin credentials (you can move this to environment variables later)
+    const ADMIN_EMAIL = 'mariem@gmail.com';
+    const ADMIN_PASSWORD = 'mariem123';
+    
+    if (email === ADMIN_EMAIL && password === ADMIN_PASSWORD) {
+      // Generate admin session token (simple approach)
+      const adminToken = `admin_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
       
       res.json({
         success: true,
-        message: 'Test customer and conversation created successfully',
-        testCustomer: {
-          uid: testCustomerId,
-          name: customerData.name,
-          vendorId: vendorId
-        },
-        sentMessage: messageResponse.data
+        message: 'Admin login successful',
+        admin: {
+          email: ADMIN_EMAIL,
+          name: 'Admin',
+          role: 'admin',
+          token: adminToken
+        }
       });
-      
-    } catch (messageError) {
-      console.error('❌ Failed to send test message:', messageError.response?.data);
-      res.status(500).json({ 
-        error: 'Failed to send test message',
-        details: messageError.response?.data 
+    } else {
+      res.status(401).json({
+        success: false,
+        error: 'Invalid admin credentials'
       });
     }
     
   } catch (error) {
-    console.error('❌ Test customer creation failed:', error.response?.data || error.message);
-    res.status(500).json({ 
-      error: 'Failed to create test customer',
-      details: error.response?.data || error.message 
-    });
-  }
-});
-
-// Debug endpoint to test CometChat connection
-app.get('/api/debug/cometchat', async (req, res) => {
-  try {
-    console.log('🔍 Testing CometChat connection...');
-    console.log('Environment variables:');
-    console.log('- COMETCHAT_APP_ID:', process.env.COMETCHAT_APP_ID ? '✅ Set' : '❌ Missing');
-    console.log('- COMETCHAT_AUTH_KEY:', process.env.COMETCHAT_AUTH_KEY ? '✅ Set' : '❌ Missing');
-    console.log('- COMETCHAT_REGION:', process.env.COMETCHAT_REGION ? '✅ Set' : '❌ Missing');
-    console.log('- API Base URL:', COMETCHAT_API_BASE);
-    // Test basic API connectivity
-    const response = await cometChatAPI('/users?limit=1');
-    res.json({
-      success: true,
-      message: 'CometChat connection successful',
-      apiBase: COMETCHAT_API_BASE,
-      totalUsers: response.data?.length || 0,
-      environment: {
-        appId: process.env.COMETCHAT_APP_ID ? 'Set' : 'Missing',
-        authKey: process.env.COMETCHAT_AUTH_KEY ? 'Set' : 'Missing',
-        region: process.env.COMETCHAT_REGION ? 'Set' : 'Missing'
-      }
-    });
-  } catch (error) {
+    console.error('❌ Admin authentication failed:', error);
     res.status(500).json({
       success: false,
-      error: error.message,
-      details: error.response?.data,
-      apiBase: COMETCHAT_API_BASE,
-      environment: {
-        appId: process.env.COMETCHAT_APP_ID ? 'Set' : 'Missing',
-        authKey: process.env.COMETCHAT_AUTH_KEY ? 'Set' : 'Missing',
-        region: process.env.COMETCHAT_REGION ? 'Set' : 'Missing'
-      }
+      error: 'Internal server error'
     });
   }
 });
 
-app.listen(process.env.PORT, () => {
-  console.log(`🚀 Backend running on port ${process.env.PORT}`);
+// Vendor authentication (separate from admin)
+app.post('/api/vendors/login', async (req, res) => {
+  try {
+    const { email, password } = req.body;
+    
+    if (!email || !password) {
+      return res.status(400).json({
+        success: false,
+        error: 'Email and password are required'
+      });
+    }
+    
+    const result = await vendorManagementService.authenticateVendor(email, password);
+    
+    if (result.success) {
+      res.json(result);
+    } else {
+      res.status(401).json(result);
+    }
+  } catch (error) {
+    console.error('❌ Vendor authentication failed:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Internal server error'
+    });
+  }
+});
+
+// Retry CometChat registration for a vendor (admin only)
+app.post('/api/admin/vendors/:vendorId/retry-cometchat', async (req, res) => {
+  try {
+    // Admin authentication check
+    const authHeader = req.headers.authorization;
+    if (!authHeader || !authHeader.startsWith('Bearer admin_')) {
+      return res.status(403).json({
+        success: false,
+        error: 'Admin access required'
+      });
+    }
+  try {
+    const { vendorId } = req.params;
+    const vendorResult = await vendorManagementService.getVendor(vendorId);
+    
+    if (!vendorResult.success) {
+      return res.status(404).json({
+        success: false,
+        error: 'Vendor not found'
+      });
+    }
+    
+    const vendor = vendorResult.vendor;
+    console.log(`🔄 Retrying CometChat registration for vendor: ${vendorId}`);
+    
+    try {
+      const cometChatResult = await registerVendorInCometChat({
+        uid: vendor.vendorId,
+        name: `${vendor.firstName} ${vendor.lastName}`,
+        email: vendor.email,
+        department: vendor.department,
+        companyName: vendor.companyName,
+        phone: vendor.phone,
+        bio: vendor.bio
+      });
+      
+      if (cometChatResult.success) {
+        vendor.cometChatUid = vendor.vendorId;
+        vendor.cometChatRegistered = true;
+        await vendor.save();
+        
+        console.log(`✅ CometChat registration successful for vendor: ${vendorId}`);
+        
+        res.json({
+          success: true,
+          message: 'CometChat registration successful',
+          vendor: {
+            vendorId: vendor.vendorId,
+            name: `${vendor.firstName} ${vendor.lastName}`,
+            cometChatRegistered: true
+          }
+        });
+      } else {
+        console.log(`❌ CometChat registration failed for vendor: ${vendorId}`, cometChatResult.error);
+        res.status(500).json({
+          success: false,
+          error: cometChatResult.error
+        });
+      }
+    } catch (error) {
+      console.error(`❌ CometChat registration error for vendor ${vendorId}:`, error.message);
+      res.status(500).json({
+        success: false,
+        error: error.message
+      });
+    }
+    
+  } catch (error) {
+    console.error('❌ Retry CometChat registration failed:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Internal server error'
+    });
+  }
 });
