@@ -261,24 +261,46 @@ app.post('/api/cometchat-webhook', async (req, res) => {
 });
 
 app.post('/api/sync-customer', async (req, res) => {
-  const { id, email, first_name } = req.body;
+  const { id, email, first_name, last_name } = req.body;
   if (!id) return res.status(400).json({ error: "Customer ID required" });
 
   try {
     let customerExists = false;
+    const customerName = `${first_name || 'Customer'} ${last_name || ''}`.trim();
+    
     // Check if customer already exists
     try {
-      await cometChatAPI(`/users/${id}`);
+      const existingCustomer = await cometChatAPI(`/users/${id}`);
       customerExists = true;
+      
+      // Update existing customer with latest Shopify info
+      const updateData = {
+        name: customerName,
+        metadata: { 
+          email: email || "guest@example.com", 
+          role: "customer",
+          shopifyName: customerName,
+          firstName: first_name,
+          lastName: last_name
+        }
+      };
+      await cometChatAPI(`/users/${id}`, 'PUT', updateData);
+      console.log(`🔄 Updated customer: ${customerName} (${email})`);
     } catch (e) {
       // User doesn't exist, create them
       const userData = {
         uid: id,
-        name: first_name || "Guest",
-        metadata: { email: email || "guest@example.com", role: "customer" }
+        name: customerName,
+        metadata: { 
+          email: email || "guest@example.com", 
+          role: "customer",
+          shopifyName: customerName,
+          firstName: first_name,
+          lastName: last_name
+        }
       };
       await cometChatAPI('/users', 'POST', userData);
-      console.log(`✅ Created customer: ${first_name} (${email})`);
+      console.log(`✅ Created customer: ${customerName} (${email})`);
     }
 
     // Auto-assign customer to a vendor if not already assigned
@@ -305,8 +327,9 @@ app.post('/api/sync-customer', async (req, res) => {
 
     res.json({ 
       success: true, 
-      message: customerExists ? "Customer already exists" : "Customer created successfully",
-      assigned: mapping[id] || null
+      message: customerExists ? "Customer updated successfully" : "Customer created successfully",
+      assigned: mapping[id] || null,
+      customerName: customerName
     });
   } catch (error) {
     console.error("Error syncing customer:", error.response?.data || error.message);
