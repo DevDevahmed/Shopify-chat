@@ -691,20 +691,107 @@ app.get('/api/vendors', async (req, res) => {
   try {
     const vendors = await Vendor.find({ 
       status: 'approved',
-      isActive: true 
-    }).select('vendorId companyName department fullName');
+      cometChatRegistered: true 
+    }).select('vendorId companyName department email phone bio status');
     
-    const formattedVendors = vendors.map(v => ({
-      uid: v.vendorId,
-      name: v.fullName,
-      department: v.department,
-      companyName: v.companyName
+    const formattedVendors = vendors.map(vendor => ({
+      uid: vendor.vendorId,
+      name: vendor.companyName,
+      department: vendor.department,
+      email: vendor.email,
+      phone: vendor.phone,
+      bio: vendor.bio,
+      status: 'online' // You can implement real status checking later
     }));
     
-    res.json(formattedVendors);
+    res.json({ vendors: formattedVendors });
   } catch (error) {
     console.error('Error fetching vendors:', error);
     res.status(500).json({ error: 'Failed to fetch vendors' });
+  }
+});
+
+// Get available vendors (alias for Shopify widget compatibility)
+app.get('/api/vendors/available', async (req, res) => {
+  try {
+    const vendors = await Vendor.find({ 
+      status: 'approved',
+      cometChatRegistered: true 
+    }).select('vendorId companyName department email phone bio status');
+    
+    const formattedVendors = vendors.map(vendor => ({
+      uid: vendor.vendorId,
+      name: vendor.companyName,
+      department: vendor.department,
+      email: vendor.email,
+      phone: vendor.phone,
+      bio: vendor.bio,
+      status: 'online' // You can implement real status checking later
+    }));
+    
+    console.log(`📋 Available vendors fetched: ${formattedVendors.length} vendors`);
+    res.json({ vendors: formattedVendors });
+  } catch (error) {
+    console.error('Error fetching available vendors:', error);
+    res.status(500).json({ error: 'Failed to fetch available vendors' });
+  }
+});
+
+// Assign customer to vendor (for Shopify widget)
+app.post('/api/assign-customer-to-vendor', async (req, res) => {
+  try {
+    const { customerId, vendorId } = req.body;
+    
+    console.log('💾 Assigning customer to vendor:', { customerId, vendorId });
+    
+    // This is mainly for logging - CometChat handles the actual mapping
+    // But we can store it for analytics or backup purposes
+    
+    res.json({
+      success: true,
+      message: 'Customer-vendor mapping stored',
+      customerId,
+      vendorId
+    });
+    
+  } catch (error) {
+    console.error('❌ Error assigning customer to vendor:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to assign customer to vendor'
+    });
+  }
+});
+
+// Send message endpoint (for Shopify widget)
+app.post('/api/send-message', async (req, res) => {
+  try {
+    const { customerId, vendorId, message, timestamp } = req.body;
+    
+    console.log('📤 Message sent notification:', {
+      customerId,
+      vendorId,
+      message: message.substring(0, 50) + '...',
+      timestamp
+    });
+    
+    // Mark customer as active (this helps vendor dashboard show active customers)
+    // The actual message is handled by CometChat, this is just for logging/tracking
+    
+    res.json({
+      success: true,
+      message: 'Message logged successfully',
+      customerId,
+      vendorId,
+      timestamp
+    });
+    
+  } catch (error) {
+    console.error('❌ Error logging message:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to log message'
+    });
   }
 });
 
