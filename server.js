@@ -11,6 +11,17 @@ const vendorManagementService = require('./services/vendorManagementService');
 // Internal vendor management system - no external APIs required
 console.log('✅ Using internal vendor management system (no external API costs)');
 const axios = require('axios');
+
+// Connect to MongoDB Atlas
+mongoose.connect(process.env.MONGODB_URI)
+  .then(() => {
+    console.log('✅ Connected to MongoDB Atlas successfully');
+    console.log('🔗 Database: vendor_chat_system');
+  })
+  .catch((error) => {
+    console.error('❌ MongoDB connection failed:', error.message);
+    process.exit(1);
+  });
 const csv = require('csv-parser');
 const { Readable } = require('stream');
 const crypto = require('crypto');
@@ -773,6 +784,56 @@ app.post('/api/vendors/login', async (req, res) => {
   }
 });
 
+// CometChat registration function
+async function registerVendorInCometChat(vendorData) {
+  try {
+    console.log(`🔄 Registering vendor in CometChat: ${vendorData.uid}`);
+    
+    const response = await axios.post(`https://api-${process.env.COMETCHAT_REGION}.cometchat.io/v3/users`, {
+      uid: vendorData.uid,
+      name: vendorData.name,
+      email: vendorData.email,
+      metadata: {
+        department: vendorData.department,
+        companyName: vendorData.companyName,
+        phone: vendorData.phone || '',
+        bio: vendorData.bio || '',
+        role: 'vendor'
+      }
+    }, {
+      headers: {
+        'Content-Type': 'application/json',
+        'apikey': process.env.COMETCHAT_AUTH_KEY
+      }
+    });
+
+    console.log(`✅ CometChat registration successful for: ${vendorData.uid}`);
+    return { 
+      success: true, 
+      data: response.data,
+      message: 'Vendor registered in CometChat successfully'
+    };
+    
+  } catch (error) {
+    console.error(`❌ CometChat registration failed for ${vendorData.uid}:`, error.response?.data || error.message);
+    
+    // Check if user already exists (409 conflict)
+    if (error.response?.status === 409) {
+      console.log(`ℹ️ Vendor ${vendorData.uid} already exists in CometChat`);
+      return { 
+        success: true, 
+        data: { uid: vendorData.uid },
+        message: 'Vendor already exists in CometChat'
+      };
+    }
+    
+    return { 
+      success: false, 
+      error: error.response?.data?.error?.message || error.message 
+    };
+  }
+}
+
 // Retry CometChat registration for a vendor (admin only)
 app.post('/api/admin/vendors/:vendorId/retry-cometchat', async (req, res) => {
   try {
@@ -784,7 +845,8 @@ app.post('/api/admin/vendors/:vendorId/retry-cometchat', async (req, res) => {
         error: 'Admin access required'
       });
     }
-  try {
+    
+    // Get vendor details
     const { vendorId } = req.params;
     const vendorResult = await vendorManagementService.getVendor(vendorId);
     
@@ -847,4 +909,13 @@ app.post('/api/admin/vendors/:vendorId/retry-cometchat', async (req, res) => {
       error: 'Internal server error'
     });
   }
+});
+
+// Start server
+const PORT = process.env.PORT || 5000;
+app.listen(PORT, () => {
+  console.log(`🚀 Server running on port ${PORT}`);
+  console.log(`📊 Environment: ${process.env.NODE_ENV || 'development'}`);
+  console.log(`🔗 MongoDB: ${process.env.MONGODB_URI ? 'Connected' : 'Not configured'}`);
+});
 });

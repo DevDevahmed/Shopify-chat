@@ -192,10 +192,7 @@ const vendorSchema = new mongoose.Schema({
   timestamps: true
 });
 
-// Indexes
-vendorSchema.index({ email: 1 });
-vendorSchema.index({ vendorId: 1 });
-vendorSchema.index({ internalVendorId: 1 });
+// Indexes for better performance (removed duplicates to fix warnings)
 vendorSchema.index({ status: 1 });
 vendorSchema.index({ department: 1 });
 
