@@ -166,22 +166,46 @@ createDefaultAdmin();
 // Vendor Registration
 app.post('/api/vendors/register', async (req, res) => {
   try {
+    console.log('🔄 Vendor registration attempt:', req.body);
+    
     const { businessName, contactName, email, phone, businessType, description, website, address } = req.body;
     
+    // Validate required fields
+    if (!businessName || !contactName || !email || !phone || !businessType) {
+      return res.status(400).json({
+        success: false,
+        message: 'Missing required fields'
+      });
+    }
+    
+    console.log('✅ Fields validated');
+    
     // Check if email already exists
+    console.log('🔍 Checking existing vendor...');
     const existingVendor = await Vendor.findOne({ email });
     if (existingVendor) {
+      console.log('❌ Email already exists:', email);
       return res.status(400).json({
         success: false,
         message: 'Email already registered. Please use a different email or contact support.'
       });
     }
     
+    console.log('✅ Email is unique');
+    
     // Generate vendor UID
     const vendorId = `vendor_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
-    const registrationId = crypto.randomUUID();
+    const registrationId = `reg_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+    
+    console.log('✅ Generated IDs:', { vendorId, registrationId });
+    
+    // Hash password
+    console.log('🔐 Hashing password...');
+    const hashedPassword = await bcrypt.hash('vendor123', 10);
+    console.log('✅ Password hashed');
     
     // Create new vendor with pending status
+    console.log('📝 Creating vendor object...');
     const vendor = new Vendor({
       vendorId,
       email,
@@ -191,12 +215,12 @@ app.post('/api/vendors/register', async (req, res) => {
       companyName: businessName,
       department: businessType,
       businessType: 'company',
-      password: await bcrypt.hash('vendor123', 10), // Default password
+      password: hashedPassword,
       internalVendorId: registrationId,
-      bio: description,
+      bio: description || '',
       status: 'pending',
       businessAddress: {
-        street: address,
+        street: address || '',
         city: '',
         state: '',
         country: '',
@@ -207,9 +231,10 @@ app.post('/api/vendors/register', async (req, res) => {
       }
     });
     
+    console.log('💾 Saving vendor to database...');
     await vendor.save();
     
-    console.log(`✅ New vendor registration: ${businessName} (${email})`);
+    console.log(`✅ New vendor registration successful: ${businessName} (${email})`);
     
     res.json({
       success: true,
@@ -219,9 +244,11 @@ app.post('/api/vendors/register', async (req, res) => {
     
   } catch (error) {
     console.error('❌ Vendor registration error:', error);
+    console.error('Error stack:', error.stack);
     res.status(500).json({
       success: false,
-      message: 'Registration failed. Please try again.'
+      message: 'Registration failed. Please try again.',
+      error: process.env.NODE_ENV === 'development' ? error.message : undefined
     });
   }
 });
