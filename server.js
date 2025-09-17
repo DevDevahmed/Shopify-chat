@@ -41,7 +41,8 @@ app.use(cors({
     const allowedOrigins = [
       'https://front-shopmariem.vercel.app',
       'https://shopify-chat-mariem.vercel.app',
-      'https://shop-vqgi.vercel.app', // Your current frontend
+      'https://shop-vqgi.vercel.app',
+      'https://shop-e2dx.vercel.app', // Your new frontend URL
     ];
     
     if (allowedOrigins.includes(origin)) {
@@ -173,18 +174,25 @@ const Admin = mongoose.model('Admin', new mongoose.Schema({
 // Create default admin if not exists
 async function createDefaultAdmin() {
   try {
-    const adminExists = await Admin.findOne({ email: 'admin@shopify-vendor.com' });
+    const adminEmail = 'admin@shopify-vendor.com';
+    const adminPassword = 'admin123';
+    
+    const adminExists = await Admin.findOne({ email: adminEmail });
     if (!adminExists) {
-      const hashedPassword = await bcrypt.hash('admin123', 10);
-      await Admin.create({
-        email: 'admin@shopify-vendor.com',
+      const hashedPassword = await bcrypt.hash(adminPassword, 10);
+      const newAdmin = await Admin.create({
+        email: adminEmail,
         password: hashedPassword,
         role: 'super_admin'
       });
-      console.log('✅ Default admin created: admin@shopify-vendor.com / admin123');
+      console.log('✅ Default admin created successfully:', adminEmail);
+      console.log('🔑 Admin ID:', newAdmin._id);
+    } else {
+      console.log('ℹ️ Default admin already exists:', adminEmail);
     }
   } catch (error) {
     console.error('❌ Error creating default admin:', error);
+    console.error('Error details:', error.message);
   }
 }
 
@@ -377,9 +385,23 @@ app.get('/api/vendor/uid/:email', async (req, res) => {
 // Admin Login
 app.post('/api/admin/login', async (req, res) => {
   try {
+    console.log('🔐 Admin login attempt:', req.body);
+    
     const { email, password } = req.body;
     
+    if (!email || !password) {
+      return res.status(400).json({
+        success: false,
+        message: 'Email and password are required.'
+      });
+    }
+    
+    // Ensure default admin exists
+    await createDefaultAdmin();
+    
     const admin = await Admin.findOne({ email });
+    console.log('👤 Admin found:', admin ? 'Yes' : 'No');
+    
     if (!admin) {
       return res.status(401).json({
         success: false,
@@ -388,6 +410,8 @@ app.post('/api/admin/login', async (req, res) => {
     }
     
     const isValidPassword = await bcrypt.compare(password, admin.password);
+    console.log('🔑 Password valid:', isValidPassword);
+    
     if (!isValidPassword) {
       return res.status(401).json({
         success: false,
@@ -397,6 +421,8 @@ app.post('/api/admin/login', async (req, res) => {
     
     // Generate admin token
     const token = crypto.randomBytes(32).toString('hex');
+    
+    console.log('✅ Admin login successful for:', email);
     
     res.json({
       success: true,
@@ -413,7 +439,8 @@ app.post('/api/admin/login', async (req, res) => {
     console.error('❌ Admin login error:', error);
     res.status(500).json({
       success: false,
-      message: 'Login failed. Please try again.'
+      message: 'Login failed. Please try again.',
+      error: process.env.NODE_ENV === 'development' ? error.message : undefined
     });
   }
 });
@@ -644,12 +671,39 @@ app.get('/api/vendors/:vendorUid/customers', async (req, res) => {
 });
 
 // Health check
-app.get('/health', (req, res) => {
-  res.json({ 
-    status: 'OK', 
-    timestamp: new Date().toISOString(),
-    database: mongoose.connection.readyState === 1 ? 'Connected' : 'Disconnected'
-  });
+app.get('/health', async (req, res) => {
+  try {
+    // Test database connection
+    const dbStatus = mongoose.connection.readyState === 1 ? 'Connected' : 'Disconnected';
+    
+    // Test admin creation
+    await createDefaultAdmin();
+    
+    // Count collections
+    const vendorCount = await Vendor.countDocuments();
+    const adminCount = await Admin.countDocuments();
+    
+    res.json({ 
+      status: 'OK', 
+      timestamp: new Date().toISOString(),
+      database: dbStatus,
+      collections: {
+        vendors: vendorCount,
+        admins: adminCount
+      },
+      environment: {
+        nodeEnv: process.env.NODE_ENV || 'development',
+        mongoUri: process.env.MONGODB_URI ? 'Configured' : 'Missing',
+        cometChatAppId: process.env.COMETCHAT_APP_ID ? 'Configured' : 'Missing'
+      }
+    });
+  } catch (error) {
+    res.status(500).json({
+      status: 'ERROR',
+      timestamp: new Date().toISOString(),
+      error: error.message
+    });
+  }
 });
 
 // Start server
