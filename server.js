@@ -22,29 +22,24 @@ mongoose.connect(process.env.MONGODB_URI)
     process.exit(1);
   });
 
-// Simple CORS configuration - Allow all origins for now
-app.use(cors({
-  origin: true, // Allow all origins
-  credentials: true,
-  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH'],
-  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'Accept', 'Origin'],
-  optionsSuccessStatus: 200
-}));
-
-app.use(express.json());
-
-// Add CORS headers to all responses
+// EMERGENCY CORS FIX - Allow everything
 app.use((req, res, next) => {
-  res.header('Access-Control-Allow-Origin', req.headers.origin || '*');
-  res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS, PATCH');
-  res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With, Accept, Origin');
-  res.header('Access-Control-Allow-Credentials', 'true');
+  // Set CORS headers for ALL requests
+  res.header('Access-Control-Allow-Origin', '*');
+  res.header('Access-Control-Allow-Methods', '*');
+  res.header('Access-Control-Allow-Headers', '*');
+  res.header('Access-Control-Max-Age', '86400');
   
+  // Handle preflight
   if (req.method === 'OPTIONS') {
-    return res.sendStatus(200);
+    res.status(200).end();
+    return;
   }
+  
   next();
 });
+
+app.use(express.json());
 
 // CometChat REST API configuration
 const COMETCHAT_API_BASE = `https://api-${process.env.COMETCHAT_REGION}.cometchat.io/v3.0`;
@@ -635,6 +630,15 @@ app.get('/api/vendors/:vendorUid/customers', async (req, res) => {
     console.error('Error fetching customers:', error);
     res.status(500).json({ error: 'Failed to fetch customers' });
   }
+});
+
+// Simple test endpoint
+app.get('/test-cors', (req, res) => {
+  res.json({ 
+    message: 'CORS is working!', 
+    timestamp: new Date().toISOString(),
+    origin: req.headers.origin || 'no-origin'
+  });
 });
 
 // Health check
