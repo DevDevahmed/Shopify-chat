@@ -37,7 +37,21 @@ function generateSecurePassword(length = 12) {
 }
 
 const app = express();
-app.use(cors());
+
+// CORS configuration for production
+app.use(cors({
+  origin: [
+    'http://localhost:3000',
+    'https://front-shopmariem.vercel.app',
+    'https://shopify-chat-mariem.vercel.app',
+    'https://*.vercel.app',
+    'https://*.netlify.app'
+  ],
+  credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With']
+}));
+
 app.use(express.json());
 app.use(express.raw({ type: 'text/csv' }));
 
@@ -217,7 +231,7 @@ app.post('/api/sync-vendors', async (req, res) => {
   }
 });
 
-app.post('/api/vendor/login', async (req, res) => {
+app.post('/api/vendors/login', async (req, res) => {
   const { email, password } = req.body;
   const vendors = await getVendors();
   const vendor = vendors.find(v => v.email === email);
