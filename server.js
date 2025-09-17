@@ -744,6 +744,61 @@ app.get('/test-cors', (req, res) => {
   });
 });
 
+// Test CometChat registration
+app.get('/test-cometchat/:vendorId', async (req, res) => {
+  try {
+    const { vendorId } = req.params;
+    
+    console.log('🧪 Testing CometChat for vendor:', vendorId);
+    
+    // Find vendor in database
+    const vendor = await Vendor.findOne({ vendorId });
+    if (!vendor) {
+      return res.status(404).json({ error: 'Vendor not found in database' });
+    }
+    
+    console.log('📋 Vendor found:', {
+      vendorId: vendor.vendorId,
+      email: vendor.email,
+      firstName: vendor.firstName,
+      lastName: vendor.lastName
+    });
+    
+    // Test CometChat registration
+    const fullName = `${vendor.firstName} ${vendor.lastName}`.trim();
+    console.log('🔄 Attempting CometChat registration...');
+    
+    const result = await registerVendorInCometChat({
+      uid: vendor.vendorId,
+      name: fullName,
+      email: vendor.email,
+      department: vendor.department,
+      companyName: vendor.companyName,
+      phone: vendor.phone,
+      bio: vendor.bio
+    });
+    
+    console.log('✅ CometChat registration result:', result);
+    
+    res.json({
+      success: true,
+      vendor: {
+        vendorId: vendor.vendorId,
+        name: fullName,
+        email: vendor.email
+      },
+      cometChatResult: result
+    });
+    
+  } catch (error) {
+    console.error('❌ CometChat test failed:', error);
+    res.status(500).json({
+      error: error.message,
+      details: error.response?.data || error.stack
+    });
+  }
+});
+
 // Health check
 app.get('/health', async (req, res) => {
   try {
