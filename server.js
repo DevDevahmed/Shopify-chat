@@ -285,34 +285,74 @@ app.get('/api/vendors/status/:registrationId', async (req, res) => {
 // Vendor Login (Updated to work with MongoDB)
 app.post('/api/vendors/login', async (req, res) => {
   try {
+    console.log('🔐 Vendor login attempt:', { email: req.body.email });
+    
     const { email, password } = req.body;
     
+    if (!email || !password) {
+      return res.status(400).json({ 
+        error: "Email and password are required" 
+      });
+    }
+    
     // Find approved vendor
+    console.log('🔍 Looking for approved vendor with email:', email);
     const vendor = await Vendor.findOne({ 
       email, 
       status: 'approved' 
     });
     
+    console.log('👤 Vendor found:', vendor ? 'Yes' : 'No');
+    if (vendor) {
+      console.log('📊 Vendor details:', {
+        id: vendor._id,
+        email: vendor.email,
+        status: vendor.status,
+        vendorId: vendor.vendorId,
+        hasPassword: !!vendor.password,
+        firstName: vendor.firstName,
+        lastName: vendor.lastName
+      });
+    }
+    
     if (!vendor) {
+      // Check if vendor exists but not approved
+      const anyVendor = await Vendor.findOne({ email });
+      if (anyVendor) {
+        console.log('❌ Vendor exists but status is:', anyVendor.status);
+        return res.status(401).json({ 
+          error: `Vendor account is ${anyVendor.status}. Please wait for admin approval.` 
+        });
+      }
       return res.status(401).json({ 
-        error: "Vendor not found or not approved" 
+        error: "Vendor not found. Please register first." 
       });
     }
     
     // Verify password
+    console.log('🔑 Verifying password...');
+    console.log('Password provided:', password);
+    console.log('Stored password hash exists:', !!vendor.password);
+    
     const isMatch = await bcrypt.compare(password, vendor.password);
+    console.log('🔑 Password match:', isMatch);
+    
     if (!isMatch) {
       return res.status(401).json({ 
         error: "Invalid password" 
       });
     }
 
+    console.log('✅ Password verified, proceeding with CometChat...');
+
     // Ensure vendor exists in CometChat
     if (!vendor.cometChatRegistered) {
+      console.log('📝 Registering vendor in CometChat...');
       try {
+        const fullName = `${vendor.firstName} ${vendor.lastName}`.trim();
         await registerVendorInCometChat({
           uid: vendor.vendorId,
-          name: vendor.fullName,
+          name: fullName,
           email: vendor.email,
           department: vendor.department,
           companyName: vendor.companyName,
@@ -323,39 +363,47 @@ app.post('/api/vendors/login', async (req, res) => {
         vendor.cometChatUid = vendor.vendorId;
         vendor.cometChatRegistered = true;
         await vendor.save();
+        console.log('✅ CometChat registration successful');
       } catch (cometChatError) {
-        console.error('CometChat registration failed:', cometChatError);
+        console.error('❌ CometChat registration failed:', cometChatError);
       }
     }
 
     try {
+      console.log('🎫 Creating CometChat auth token...');
       // Create auth token for vendor using CometChat REST API
       const tokenResponse = await cometChatAPI(`/users/${vendor.vendorId}/auth_tokens`, 'POST');
       const token = tokenResponse.data.authToken;
+      
+      console.log('✅ Auth token created successfully');
       
       // Update last login
       vendor.lastLoginAt = new Date();
       await vendor.save();
       
+      const fullName = `${vendor.firstName} ${vendor.lastName}`.trim();
+      
+      console.log('🎉 Login successful for:', email);
+      
       res.json({ 
         token, 
         uid: vendor.vendorId, 
-        name: vendor.fullName 
+        name: fullName 
       });
     } catch (error) {
-      console.error('Failed to create auth token:', error.response?.data || error.message);
+      console.error('❌ Failed to create auth token:', error.response?.data || error.message);
       res.status(500).json({ error: 'Failed to create authentication token' });
     }
     
   } catch (error) {
     console.error('❌ Vendor login error:', error);
+    console.error('Error stack:', error.stack);
     res.status(500).json({
-      error: 'Login failed. Please try again.'
+      error: 'Login failed. Please try again.',
+      details: process.env.NODE_ENV === 'development' ? error.message : undefined
     });
   }
 });
-
-// Get vendor UID by email
 app.get('/api/vendor/uid/:email', async (req, res) => {
   try {
     const vendor = await Vendor.findOne({ email: req.params.email, status: 'approved' });
