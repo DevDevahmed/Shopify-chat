@@ -22,21 +22,61 @@ mongoose.connect(process.env.MONGODB_URI)
     process.exit(1);
   });
 
-// CORS configuration
+// CORS configuration - Allow all Vercel apps and development
 app.use(cors({
-  origin: [
-    'http://localhost:3000',
-    'https://front-shopmariem.vercel.app',
-    'https://shopify-chat-mariem.vercel.app',
-    'https://*.vercel.app',
-    'https://*.netlify.app'
-  ],
+  origin: function (origin, callback) {
+    // Allow requests with no origin (like mobile apps or curl requests)
+    if (!origin) return callback(null, true);
+    
+    // Allow localhost for development
+    if (origin.includes('localhost')) return callback(null, true);
+    
+    // Allow all Vercel apps
+    if (origin.includes('.vercel.app')) return callback(null, true);
+    
+    // Allow all Netlify apps
+    if (origin.includes('.netlify.app')) return callback(null, true);
+    
+    // Allow specific domains
+    const allowedOrigins = [
+      'https://front-shopmariem.vercel.app',
+      'https://shopify-chat-mariem.vercel.app',
+      'https://shop-vqgi.vercel.app', // Your current frontend
+    ];
+    
+    if (allowedOrigins.includes(origin)) {
+      return callback(null, true);
+    }
+    
+    // Default allow for development
+    callback(null, true);
+  },
   credentials: true,
-  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With']
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH'],
+  allowedHeaders: [
+    'Content-Type', 
+    'Authorization', 
+    'X-Requested-With',
+    'Accept',
+    'Origin',
+    'Access-Control-Request-Method',
+    'Access-Control-Request-Headers'
+  ],
+  exposedHeaders: ['Content-Length', 'X-Foo', 'X-Bar'],
+  preflightContinue: false,
+  optionsSuccessStatus: 200
 }));
 
 app.use(express.json());
+
+// Handle preflight requests for all routes
+app.options('*', (req, res) => {
+  res.header('Access-Control-Allow-Origin', req.headers.origin || '*');
+  res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS, PATCH');
+  res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With, Accept, Origin');
+  res.header('Access-Control-Allow-Credentials', 'true');
+  res.sendStatus(200);
+});
 
 // CometChat REST API configuration
 const COMETCHAT_API_BASE = `https://api-${process.env.COMETCHAT_REGION}.cometchat.io/v3.0`;
