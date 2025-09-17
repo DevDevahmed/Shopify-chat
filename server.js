@@ -94,6 +94,7 @@ async function registerVendorInCometChat(vendorData) {
     }, {
       headers: {
         'Content-Type': 'application/json',
+        'appId': process.env.COMETCHAT_APP_ID,
         'apiKey': process.env.COMETCHAT_AUTH_KEY
       }
     });
