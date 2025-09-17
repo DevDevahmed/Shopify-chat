@@ -80,7 +80,7 @@ async function registerVendorInCometChat(vendorData) {
   try {
     console.log(`🔄 Registering vendor in CometChat: ${vendorData.uid}`);
     
-    const response = await axios.post(`https://api-${process.env.COMETCHAT_REGION}.cometchat.io/v3/users`, {
+    const response = await axios.post(`https://api-${process.env.COMETCHAT_REGION}.cometchat.io/v3.0/users`, {
       uid: vendorData.uid,
       name: vendorData.name,
       email: vendorData.email,
@@ -94,7 +94,7 @@ async function registerVendorInCometChat(vendorData) {
     }, {
       headers: {
         'Content-Type': 'application/json',
-        'apikey': process.env.COMETCHAT_AUTH_KEY
+        'apiKey': process.env.COMETCHAT_AUTH_KEY
       }
     });
 
