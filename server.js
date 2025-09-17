@@ -370,8 +370,31 @@ app.post('/api/vendors/login', async (req, res) => {
     }
 
     try {
-      console.log('🎫 Creating CometChat auth token...');
-      // Create auth token for vendor using CometChat REST API
+      console.log('🎫 Creating CometChat auth token for vendor:', vendor.vendorId);
+      
+      // First, check if user exists in CometChat
+      try {
+        console.log('🔍 Checking if vendor exists in CometChat...');
+        const userCheck = await cometChatAPI(`/users/${vendor.vendorId}`);
+        console.log('✅ Vendor exists in CometChat:', userCheck.data.uid);
+      } catch (checkError) {
+        console.log('❌ Vendor not found in CometChat, creating...');
+        // Force re-register in CometChat
+        const fullName = `${vendor.firstName} ${vendor.lastName}`.trim();
+        await registerVendorInCometChat({
+          uid: vendor.vendorId,
+          name: fullName,
+          email: vendor.email,
+          department: vendor.department,
+          companyName: vendor.companyName,
+          phone: vendor.phone,
+          bio: vendor.bio
+        });
+        console.log('✅ Vendor re-registered in CometChat');
+      }
+      
+      // Now create auth token
+      console.log('🎫 Creating auth token...');
       const tokenResponse = await cometChatAPI(`/users/${vendor.vendorId}/auth_tokens`, 'POST');
       const token = tokenResponse.data.authToken;
       
@@ -391,8 +414,13 @@ app.post('/api/vendors/login', async (req, res) => {
         name: fullName 
       });
     } catch (error) {
-      console.error('❌ Failed to create auth token:', error.response?.data || error.message);
-      res.status(500).json({ error: 'Failed to create authentication token' });
+      console.error('❌ Failed to create auth token:', error);
+      console.error('❌ Error details:', error.response?.data || error.message);
+      console.error('❌ Error stack:', error.stack);
+      res.status(500).json({ 
+        error: 'Failed to create authentication token',
+        details: error.response?.data?.error?.message || error.message
+      });
     }
     
   } catch (error) {
